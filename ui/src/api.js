@@ -13,7 +13,8 @@ async function call(path, body) {
 
 export const api = {
   health: () => call("/health"),
-  runPipeline: (count, dry_run) => call("/pipelines/hapi-to-medplum", { count, dry_run }),
+  runPipeline: (count, dry_run, offset = 0, resource_type = "Patient") =>
+    call("/pipelines/hapi-to-medplum", { count, dry_run, offset, resource_type }),
   suggestMapping: (sample, target_resource) => call("/mappings/suggest", { sample, target_resource }),
   transform: (mapping, payload) => call("/transform", { mapping, payload }),
 };

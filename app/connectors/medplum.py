@@ -45,4 +45,6 @@ class MedplumClient:
         )
         if r.status_code not in (200, 201):
             raise MedplumError(f"{r.status_code}: {r.text[:300]}")
-        return r.json()
+        res = r.json()
+        res["_is_created"] = (r.status_code == 201)
+        return res

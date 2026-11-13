@@ -17,7 +17,9 @@ app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"],
 
 
 class PipelineRequest(BaseModel):
+    resource_type: str = "Patient"
     count: int = 10
+    offset: int = 0
     dry_run: bool = True  # safe default: nothing is written unless you ask
 
 
@@ -40,7 +42,14 @@ def health():
 def hapi_to_medplum(req: PipelineRequest):
     s = get_settings()
     medplum = None if req.dry_run else MedplumClient(s.medplum_base_url, s.medplum_client_id, s.medplum_client_secret)
-    return run_hapi_to_medplum(HapiClient(s.hapi_base_url), medplum, count=req.count, dry_run=req.dry_run).to_dict()
+    return run_hapi_to_medplum(
+        HapiClient(s.hapi_base_url),
+        medplum,
+        resource_type=req.resource_type,
+        count=req.count,
+        offset=req.offset,
+        dry_run=req.dry_run,
+    ).to_dict()
 
 
 @app.post("/mappings/suggest")

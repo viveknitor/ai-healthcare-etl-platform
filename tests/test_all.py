@@ -104,3 +104,42 @@ def test_suggester_rejects_hallucinated_source_field():
 def test_suggester_requires_api_key():
     with pytest.raises(SuggestError, match="GEMINI_API_KEY"):
         suggest_mapping(SAMPLE, "Patient", api_key="", model="m")
+
+
+def test_normalize_remaps_cross_resource_reference():
+    from app.pipeline import normalize_for_target
+    obs = {
+        "resourceType": "Observation",
+        "id": "obs-1",
+        "status": "final",
+        "code": {"coding": [{"system": "http://loinc.org", "code": "883-9", "display": "ABO group"}]},
+        "subject": {"reference": "Patient/nhanes-120412"}
+    }
+    normalized, system, val = normalize_for_target(obs, "hapi")
+    assert normalized["subject"]["reference"] == "Patient?identifier=urn:source:hapi|nhanes-120412"
+    assert "id" not in normalized
+    assert normalized["identifier"][-1] == {"system": "urn:source:hapi", "value": "obs-1"}
+
+
+def test_extract_clinical_summary_observation_and_condition():
+    from app.pipeline import extract_clinical_summary
+    obs = {
+        "resourceType": "Observation",
+        "status": "final",
+        "code": {"text": "Blood Glucose"},
+        "valueQuantity": {"value": 98, "unit": "mg/dL"},
+        "subject": {"reference": "Patient/123"}
+    }
+    s = extract_clinical_summary(obs)
+    assert s["title"] == "Blood Glucose"
+    assert s["primary_value"] == "98 mg/dL"
+    assert s["subject_reference"] == "Patient/123"
+
+    cond = {
+        "resourceType": "Condition",
+        "code": {"text": "Hypertension", "coding": [{"code": "I10"}]},
+        "clinicalStatus": {"coding": [{"code": "active"}]}
+    }
+    sc = extract_clinical_summary(cond)
+    assert sc["title"] == "Hypertension"
+    assert "I10" in sc["primary_value"]

@@ -13,10 +13,13 @@ class HapiClient:
         self.client = httpx.Client(transport=transport, timeout=30,
                                    headers={"Accept": "application/fhir+json"})
 
-    def fetch(self, resource_type: str = "Patient", count: int = 10, page_size: int = 10) -> Iterator[dict]:
+    def fetch(self, resource_type: str = "Patient", count: int = 10, offset: int = 0, page_size: int = 10) -> Iterator[dict]:
         url: str | None = f"{self.base_url}/{resource_type}"
         params: dict | None = {"_count": min(page_size, count)}
+        if offset > 0:
+            params["_getpagesoffset"] = offset
         yielded = 0
+        seen_ids = set()
         while url and yielded < count:
             resp = request_with_retry(self.client, "GET", url, params=params)
             resp.raise_for_status()
@@ -24,9 +27,15 @@ class HapiClient:
             for entry in bundle.get("entry", []):
                 res = entry.get("resource")
                 if res and res.get("resourceType") == resource_type:
+                    sid = res.get("id")
+                    if sid and sid in seen_ids:
+                        continue  # In-batch deduplication guarantee
+                    if sid:
+                        seen_ids.add(sid)
                     yield res
                     yielded += 1
                     if yielded >= count:
                         return
             url = next((l["url"] for l in bundle.get("link", []) if l.get("relation") == "next"), None)
             params = None  # the next link already carries its own query string
+
