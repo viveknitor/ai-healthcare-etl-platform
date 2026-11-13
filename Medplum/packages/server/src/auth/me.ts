@@ -1,0 +1,256 @@
+// SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
+// SPDX-License-Identifier: Apache-2.0
+import type { ProfileResource, WithId } from '@medplum/core';
+import { AccessPolicyInteraction, getReferenceString, Operator } from '@medplum/core';
+import type {
+  ClientApplication,
+  Login,
+  Project,
+  ProjectMembership,
+  Reference,
+  User,
+  UserConfiguration,
+  UserConfigurationMenu,
+} from '@medplum/fhirtypes';
+import Bowser from 'bowser';
+import type { Request, Response } from 'express';
+import { getAuthenticatedContext } from '../context';
+import { getAccessPolicyForLogin } from '../fhir/accesspolicy';
+import { membershipProfileTypes, readMembershipReference } from '../fhir/projectmembership';
+import type { SystemRepository } from '../fhir/repo';
+import { rewriteAttachments, RewriteMode } from '../fhir/rewrite';
+import { canManageUserAccount, hasSmartResourceScopes, isMfaRequired } from './utils';
+
+interface UserSession {
+  id: string;
+  lastUpdated: string;
+  authMethod: string;
+  remoteAddress: string;
+  browser?: string;
+  os?: string;
+  project?: Reference;
+}
+
+interface UserSecurity {
+  mfaEnrolled: boolean;
+  mfaRequired: boolean;
+  sessions: UserSession[];
+  memberships: Partial<ProjectMembership>[];
+}
+
+export async function meHandler(req: Request, res: Response): Promise<void> {
+  const { authState, repo, systemRepo, project, membership } = getAuthenticatedContext();
+  const profileRef = membership.profile as Reference<ProfileResource | ClientApplication>;
+  let profile = await readMembershipReference<ProfileResource | ClientApplication>(
+    systemRepo,
+    membership,
+    profileRef,
+    membershipProfileTypes,
+    { allowLinkedProjects: true }
+  );
+  if (hasSmartResourceScopes(authState.login) && !repo.canPerformInteraction(AccessPolicyInteraction.READ, profile)) {
+    profile = { resourceType: profile.resourceType, id: profile.id } as WithId<ProfileResource>;
+  }
+  profile = repo.removeHiddenFields(profile, AccessPolicyInteraction.READ, true);
+  if (profile.resourceType === 'ClientApplication') {
+    profile = { ...profile };
+    delete profile.secret;
+    delete profile.retiringSecret;
+  }
+  const config = await getUserConfiguration(systemRepo, project, membership);
+  const accessPolicy = await getAccessPolicyForLogin(authState);
+  let user: WithId<User> | undefined = undefined;
+
+  let security: UserSecurity | undefined = undefined;
+  if (!authState.onBehalfOfMembership && membership.user?.reference?.startsWith('User/')) {
+    user = await systemRepo.readReference<User>(membership.user as Reference<User>);
+  }
+
+  // Account security details are only for logins that can manage the account (see getCallerUserReference)
+  if (user && !hasSmartResourceScopes(authState.login)) {
+    const memberships = await systemRepo.searchResources<ProjectMembership>({
+      resourceType: 'ProjectMembership',
+      filters: [
+        {
+          code: 'user',
+          operator: Operator.EQUALS,
+          value: getReferenceString(user),
+        },
+        {
+          code: 'project',
+          operator: Operator.EQUALS,
+          value: getReferenceString(project),
+        },
+      ],
+    });
+    const sessions = await getSessions(
+      systemRepo,
+      user,
+      canManageUserAccount(authState.login) ? undefined : memberships
+    );
+    security = {
+      mfaEnrolled: !!user.mfaEnrolled,
+      mfaRequired: isMfaRequired(user, project),
+      sessions,
+      memberships: memberships
+        .filter((m) => m.active !== false)
+        .map((membership) => ({
+          resourceType: 'ProjectMembership',
+          id: membership.id,
+          identifier: membership.identifier,
+          profile: membership.profile,
+          admin: membership.admin,
+        })),
+    };
+  }
+
+  const result = {
+    user: user
+      ? {
+          resourceType: 'User',
+          id: user.id,
+          email: user.email,
+          identifier: user.identifier,
+        }
+      : undefined,
+    project: {
+      resourceType: 'Project',
+      id: project.id,
+      name: project.name,
+      features: project.features,
+      description: project.description,
+      strictMode: project.strictMode,
+      superAdmin: project.superAdmin,
+    },
+    membership: {
+      resourceType: 'ProjectMembership',
+      id: membership.id,
+      identifier: membership.identifier,
+      user: membership.user,
+      profile: membership.profile,
+      admin: membership.admin,
+    },
+    profile,
+    config,
+    accessPolicy,
+    security,
+  };
+
+  res.status(200).json(await rewriteAttachments(RewriteMode.PRESIGNED_URL, repo, result));
+}
+
+export async function getUserConfiguration(
+  systemRepo: SystemRepository,
+  project: Project,
+  membership: ProjectMembership
+): Promise<UserConfiguration> {
+  let result: UserConfiguration;
+
+  if (membership.userConfiguration) {
+    result = await readMembershipReference<UserConfiguration>(
+      systemRepo,
+      membership,
+      membership.userConfiguration,
+      ['UserConfiguration'],
+      { allowLinkedProjects: true }
+    );
+  } else {
+    result = { resourceType: 'UserConfiguration' };
+  }
+
+  result.menu ??= getUserConfigurationMenu(project, membership);
+  return result;
+}
+
+export function getUserConfigurationMenu(project: Project, membership: ProjectMembership): UserConfigurationMenu[] {
+  const favorites = ['Patient', 'Practitioner', 'Organization', 'ServiceRequest', 'DiagnosticReport', 'Questionnaire'];
+
+  const result = [
+    {
+      title: 'Favorites',
+      link: favorites.map((resourceType) => ({ name: resourceType, target: '/' + resourceType })),
+    },
+  ];
+
+  const link = [
+    { name: 'Project', target: '/admin/project' },
+    { name: 'AccessPolicy', target: '/AccessPolicy' },
+    { name: 'Subscriptions', target: '/Subscription' },
+    { name: 'Batch', target: '/batch' },
+  ];
+  if (!project.superAdmin) {
+    link.push({ name: 'Config', target: '/admin/config' });
+  }
+  if (membership.admin) {
+    result.push({ title: 'Admin', link });
+  }
+
+  if (project.superAdmin) {
+    result.push({
+      title: 'Super Admin',
+      link: [
+        { name: 'Projects', target: '/Project' },
+        { name: 'Super Config', target: '/admin/super' },
+        { name: 'Super AsyncJob', target: '/admin/super/asyncjob' },
+        { name: 'Super DB', target: '/admin/super/db' },
+      ],
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Returns the user's recent sessions.
+ * @param systemRepo - The system repository.
+ * @param user - The user.
+ * @param memberships - Optional memberships; if set, only sessions for one of these memberships are returned.
+ * @returns The user's sessions.
+ */
+async function getSessions(
+  systemRepo: SystemRepository,
+  user: WithId<User>,
+  memberships?: WithId<ProjectMembership>[]
+): Promise<UserSession[]> {
+  const membershipRefs = memberships && new Set(memberships.map((m) => getReferenceString(m)));
+  const logins = await systemRepo.searchResources<Login>({
+    resourceType: 'Login',
+    filters: [
+      {
+        code: 'user',
+        operator: Operator.EQUALS,
+        value: getReferenceString(user),
+      },
+      {
+        code: '_lastUpdated',
+        operator: Operator.GREATER_THAN,
+        value: new Date(Date.now() - 3600 * 1000).toISOString(),
+      },
+    ],
+  });
+
+  const result = [];
+  for (const login of logins) {
+    // A login that has not been granted yet is not a session
+    if (!login.membership?.reference || !login.granted || login.revoked) {
+      continue;
+    }
+    if (membershipRefs && !membershipRefs.has(login.membership.reference)) {
+      continue;
+    }
+
+    // Previously used ua-parser, but ultimately replaced due to incompatible licence
+    const browser = login.userAgent ? Bowser.getParser(login.userAgent) : undefined;
+
+    result.push({
+      id: login.id,
+      lastUpdated: login.meta?.lastUpdated as string,
+      authMethod: login.authMethod as string,
+      remoteAddress: login.remoteAddress as string,
+      browser: browser?.getBrowser()?.name,
+      os: browser?.getOS()?.name,
+      project: login.project,
+    });
+  }
+  return result;
+}

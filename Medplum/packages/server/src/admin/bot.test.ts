@@ -1,0 +1,123 @@
+// SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
+// SPDX-License-Identifier: Apache-2.0
+import { Operator, resolveId } from '@medplum/core';
+import type { Binary, Bot, ProjectMembership } from '@medplum/fhirtypes';
+import { randomUUID } from 'crypto';
+import express from 'express';
+import request from 'supertest';
+import { initApp, shutdownApp } from '../app';
+import { registerNew } from '../auth/register';
+import { loadTestConfig } from '../config/loader';
+import { getGlobalSystemRepo } from '../fhir/repo';
+import { createTestProject, getSuperAdminAccessToken, withTestContext } from '../test.setup';
+
+const app = express();
+
+describe('Bot admin', () => {
+  beforeAll(async () => {
+    const config = await loadTestConfig();
+    return withTestContext(() => initApp(app, config));
+  });
+
+  afterAll(async () => {
+    await shutdownApp();
+  });
+
+  test('Create new bot', async () => {
+    // First, Alice creates a project
+    const { project, accessToken } = await withTestContext(() =>
+      registerNew({
+        firstName: 'Alice',
+        lastName: 'Smith',
+        projectName: 'Alice Project',
+        email: `alice${randomUUID()}@example.com`,
+        password: 'password!@#',
+      })
+    );
+
+    // Next, Alice creates a bot
+    const res2 = await request(app)
+      .post('/admin/projects/' + project.id + '/bot')
+      .set('Authorization', 'Bearer ' + accessToken)
+      .type('json')
+      .send({
+        name: 'Alice personal bot',
+        description: 'Alice bot description',
+      });
+    expect(res2).toHaveStatus(201);
+    expect(res2.body.resourceType).toBe('Bot');
+    expect(res2.body.id).toBeDefined();
+    expect(res2.body.code).toBeUndefined();
+    expect(res2.body.sourceCode).toBeDefined();
+
+    // Read the bot
+    const res3 = await request(app)
+      .get('/fhir/R4/Bot/' + res2.body.id)
+      .set('Authorization', 'Bearer ' + accessToken);
+    expect(res3).toHaveStatus(200);
+    expect(res3.body.resourceType).toBe('Bot');
+    expect(res3.body.id).toBe(res2.body.id);
+
+    const systemRepo = getGlobalSystemRepo();
+    const bot = await systemRepo.readResource<Bot>('Bot', res2.body.id);
+    expect(bot.meta?.project).toBe(project.id);
+    const binary = await systemRepo.readReference<Binary>({ reference: bot.sourceCode?.url });
+    expect(binary.meta?.project).toBe(project.id);
+
+    // Create bot with invalid name (should fail)
+    const res4 = await request(app)
+      .post('/admin/projects/' + project.id + '/bot')
+      .set('Authorization', 'Bearer ' + accessToken)
+      .type('json')
+      .send({ foo: 'bar' });
+    expect(res4).toHaveStatus(400);
+  });
+
+  test('Super admin creates bot in target project', async () => {
+    const { project } = await createTestProject();
+
+    const superAdminAccessToken = await getSuperAdminAccessToken();
+    const res = await request(app)
+      .post('/admin/projects/' + project.id + '/bot')
+      .set('Authorization', 'Bearer ' + superAdminAccessToken)
+      .type('json')
+      .send({ name: 'Super admin test bot' });
+    expect(res).toHaveStatus(201);
+    const botId = (res.body as Bot).id as string;
+
+    const systemRepo = getGlobalSystemRepo();
+    const bot = await systemRepo.readResource<Bot>('Bot', botId);
+    expect(bot.meta?.project).toBe(project.id);
+
+    const binary = await systemRepo.readReference<Binary>({ reference: bot.sourceCode?.url });
+    expect(binary.meta?.project).toBe(project.id);
+
+    const membership = await systemRepo.searchOne<ProjectMembership>({
+      resourceType: 'ProjectMembership',
+      filters: [{ code: 'profile', operator: Operator.EQUALS, value: 'Bot/' + botId }],
+    });
+    expect(resolveId(membership?.project)).toBe(project.id);
+  });
+
+  test('Super admin creates bot in missing project', async () => {
+    const superAdminAccessToken = await getSuperAdminAccessToken();
+    const res = await request(app)
+      .post('/admin/projects/' + randomUUID() + '/bot')
+      .set('Authorization', 'Bearer ' + superAdminAccessToken)
+      .type('json')
+      .send({ name: 'Missing project bot' });
+    expect(res).toHaveStatus(404);
+  });
+
+  test('Project admin cannot create bot in another project', async () => {
+    const { project: otherProject } = await createTestProject();
+    const { accessToken } = await createTestProject({ membership: { admin: true }, withAccessToken: true });
+
+    const res = await request(app)
+      .post('/admin/projects/' + otherProject.id + '/bot')
+      .set('Authorization', 'Bearer ' + accessToken)
+      .type('json')
+      .send({ name: 'Cross project bot' });
+    expect(res).toHaveStatus(403);
+  });
+});

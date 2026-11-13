@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
+// SPDX-License-Identifier: Apache-2.0
+/// <reference types="vite/client" />
+import react from '@vitejs/plugin-react';
+import { execSync } from 'child_process';
+import { copyFileSync, existsSync } from 'fs';
+import path from 'path';
+import { defineConfig } from 'vite';
+import packageJson from './package.json' with { type: 'json' };
+
+if (!existsSync(path.join(import.meta.dirname, '.env'))) {
+  copyFileSync(path.join(import.meta.dirname, '.env.defaults'), path.join(import.meta.dirname, '.env'));
+}
+
+let gitHash;
+try {
+  gitHash = execSync('git rev-parse --short=7 HEAD').toString().trim();
+} catch (_err) {
+  gitHash = 'unknown'; // Default value when not in a git repository
+}
+
+process.env.MEDPLUM_VERSION = packageJson.version + '-' + gitHash;
+
+export default defineConfig({
+  envPrefix: ['MEDPLUM_', 'GOOGLE_', 'RECAPTCHA_'],
+  plugins: [react()],
+  server: {
+    port: 3000,
+    allowedHosts: true,
+  },
+  preview: {
+    port: 3000,
+    allowedHosts: true,
+  },
+  publicDir: 'static',
+  build: {
+    sourcemap: true,
+    cssTarget: ['chrome123', 'edge123', 'firefox120', 'safari17.5', 'ios17.5'], // Native `light-dark()` support
+  },
+  resolve: {
+    alias: [{ find: /^@medplum\/([\w-]+)$/, replacement: path.resolve(import.meta.dirname, '../$1/src') }],
+  },
+});

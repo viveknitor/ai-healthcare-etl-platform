@@ -1,0 +1,40 @@
+{
+  "name": "@medplum/docs",
+  "version": "5.2.17",
+  "description": "Medplum Docs",
+  "homepage": "https://www.medplum.com/",
+  "bugs": {
+    "url": "https://github.com/medplum/medplum/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/medplum/medplum.git",
+    "directory": "packages/docs"
+  },
+  "license": "Apache-2.0",
+  "author": "Medplum <hello@medplum.com>",
+  "scripts": {
+    "build": "rimraf public && hugo --minify",
+    "build:guides": "node scripts/build-decision-guides.mjs",
+    "dev": "hugo server --buildDrafts --buildFuture --noHTTPCache",
+    "preview": "hugo server -e production --minify --disableLiveReload"
+  },
+  "prettier": {
+    "printWidth": 160,
+    "singleQuote": true,
+    "trailingComma": "es5"
+  },
+  "devDependencies": {
+    "@docsearch/css": "5.2.0",
+    "@docsearch/js": "5.2.0",
+    "@medplum/core": "5.2.17",
+    "@swup/preload-plugin": "3.2.12",
+    "@tabler/icons": "3.50.0",
+    "hugo-bin": "0.167.0",
+    "infima": "0.2.0-alpha.45",
+    "mermaid": "12.3.0",
+    "open-color": "1.9.1",
+    "rimraf": "6.1.4",
+    "swup": "4.10.0"
+  }
+}

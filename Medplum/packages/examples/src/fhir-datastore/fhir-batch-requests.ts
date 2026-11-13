@@ -1,0 +1,445 @@
+// SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
+// SPDX-License-Identifier: Apache-2.0
+
+// start-block imports
+import { MedplumClient } from '@medplum/core';
+import type { Bundle, BundleEntry, Patient } from '@medplum/fhirtypes';
+import { readFile } from 'fs/promises';
+// end-block imports
+
+const medplum = new MedplumClient();
+
+// start-block simpleBatchTs
+await medplum.executeBatch({
+  resourceType: 'Bundle',
+  type: 'batch',
+  entry: [
+    {
+      request: {
+        method: 'GET',
+        url: 'Patient/homer-simpson',
+      },
+    },
+    {
+      request: {
+        method: 'GET',
+        url: 'Patient/marge-simpson',
+      },
+    },
+  ],
+});
+// end-block simpleBatchTs
+/*
+// start-block simpleBatchCli
+medplum post Bundle '
+  {
+    "resourceType": "Bundle",
+    "type": "batch",
+    "entry": [
+      {
+        "request": {
+          "method": "GET",
+          "url": "Patient/homer-simpson",
+        },
+      },
+      {
+        "request": {
+          "method": "GET",
+          "url": "Patient/marge-simpson",
+        },
+      },
+    ],
+  }'
+// end-block simpleBatchCli
+
+// start-block simpleBatchCurl
+curl 'https://api.medplum.com/fhir/R4' \
+  -X POST
+  -H 'authorization: Bearer $ACCESS_TOKEN' \
+  -H 'content-type: application/fhir+json' \
+  -d '{
+    "resourceType": "Bundle",
+    "type": "batch",
+    "entry": [
+      {
+        "request": {
+          "method": "GET",
+          "url": "Patient/homer-simpson",
+        },
+      },
+      {
+        "request": {
+          "method": "GET",
+          "url": "Patient/marge-simpson",
+        },
+      },
+    ],
+  }'
+// end-block simpleBatchCurl
+
+// start-block asyncBatchCurl
+curl 'https://api.medplum.com/fhir/R4' \
+  -X POST
+  -H 'authorization: Bearer $ACCESS_TOKEN' \
+  -H 'content-type: application/fhir+json' \
+  -H 'prefer: respond-async'
+  -d @large-bundle.json
+// end-block asyncBatchCurl
+*/
+
+// TODO: Fix up this client function to have correct return type and/or handle polling AsyncJob internally
+// start-block asyncBatchTs
+await medplum.executeBatch(JSON.parse(await readFile('large-bundle.json', 'utf8')), {
+  headers: { prefer: 'respond-async' },
+});
+// end-block asyncBatchTs
+
+const batchCreate: Bundle =
+  // start-block batchCreate
+  {
+    resourceType: 'Bundle',
+    type: 'batch',
+    entry: [
+      {
+        resource: {
+          resourceType: 'Patient',
+          identifier: [
+            {
+              system: 'https://example-org.com/patient-ids',
+              value: 'homer-simpson',
+            },
+          ],
+          name: [
+            {
+              family: 'Simpson',
+              given: ['Homer', 'Jay'],
+            },
+          ],
+        },
+        request: {
+          method: 'POST',
+          url: 'Patient',
+        },
+      },
+      {
+        resource: {
+          resourceType: 'Patient',
+          identifier: [
+            {
+              system: 'https://example-org.com/patient-ids',
+              value: 'marge-simpson',
+            },
+          ],
+          name: [
+            {
+              family: 'Simpson',
+              given: ['Marge', 'Jacqueline'],
+            },
+          ],
+        },
+        request: {
+          method: 'POST',
+          url: 'Patient',
+        },
+      },
+    ],
+  };
+// end-block batchCreate
+
+const history: Bundle =
+  // start-block historyEndpoint
+  {
+    resourceType: 'Bundle',
+    type: 'batch',
+    entry: [
+      {
+        request: {
+          method: 'GET',
+          url: 'Patient/homer-simpson/_history',
+        },
+      },
+      {
+        request: {
+          method: 'GET',
+          url: 'Patient/marge-simpson/_history',
+        },
+      },
+      {
+        request: {
+          method: 'GET',
+          url: 'Organization/_history',
+        },
+      },
+    ],
+  };
+// end-block historyEndpoint
+
+const internalReference: Bundle =
+  // start-block internalReference
+  {
+    resourceType: 'Bundle',
+    type: 'transaction',
+    entry: [
+      {
+        // highlight-next-line
+        fullUrl: 'urn:uuid:f7c8d72c-e02a-4baf-ba04-038c9f753a1c',
+        resource: {
+          resourceType: 'Patient',
+          name: [
+            {
+              prefix: ['Ms.'],
+              family: 'Doe',
+              given: ['Jane'],
+            },
+          ],
+          gender: 'female',
+          birthDate: '1970-01-01',
+        },
+        request: {
+          method: 'POST',
+          url: 'Patient',
+        },
+      },
+      {
+        fullUrl: 'urn:uuid:7c988bc7-f811-4931-a166-7c1ac5b41a38',
+        resource: {
+          resourceType: 'Encounter',
+          status: 'finished',
+          class: { code: 'ambulatory' },
+          subject: {
+            // highlight-next-line
+            reference: 'urn:uuid:f7c8d72c-e02a-4baf-ba04-038c9f753a1c',
+            display: 'Ms. Jane Doe',
+          },
+          type: [
+            {
+              coding: [
+                {
+                  system: 'http://snomed.info/sct',
+                  code: '162673000',
+                  display: 'General examination of patient (procedure)',
+                },
+              ],
+            },
+          ],
+        },
+        request: {
+          method: 'POST',
+          url: 'Encounter',
+        },
+      },
+    ],
+  };
+// end-block internalReference
+
+const externalReference: Bundle =
+  // start-block externalReference
+  {
+    resourceType: 'Bundle',
+    type: 'batch',
+    entry: [
+      {
+        resource: {
+          resourceType: 'Patient',
+          name: [
+            {
+              prefix: ['Ms.'],
+              family: 'Doe',
+              given: ['Jane'],
+            },
+          ],
+          gender: 'female',
+          birthDate: '1970-01-01',
+          // highlight-next-line
+          generalPractitioner: [{ reference: 'Practitioner?identifier=http://hl7.org/fhir/sid/us-npi|1234567893' }],
+        },
+        request: {
+          method: 'POST',
+          url: 'Patient',
+        },
+      },
+      {
+        resource: {
+          resourceType: 'Patient',
+          name: [
+            {
+              prefix: ['Mr.'],
+              family: 'Doe',
+              given: ['John'],
+            },
+          ],
+          gender: 'male',
+          birthDate: '1972-12-31',
+          // highlight-next-line
+          generalPractitioner: [{ reference: 'Practitioner?identifier=http://hl7.org/fhir/sid/us-npi|1234567893' }],
+        },
+        request: {
+          method: 'POST',
+          url: 'Patient',
+        },
+      },
+    ],
+  };
+// end-block externalReference
+
+const conditional: Bundle =
+  // start-block conditionalCreate
+  {
+    resourceType: 'Bundle',
+    type: 'transaction',
+    entry: [
+      {
+        fullUrl: 'urn:uuid:4aac5fb6-c2ff-4851-b3cf-d66d63a82a17',
+        resource: {
+          resourceType: 'Organization',
+          identifier: [
+            {
+              system: 'http://example-org.com/organizations',
+              value: 'example-organization',
+            },
+          ],
+          name: 'Example Organization',
+        },
+        request: {
+          method: 'POST',
+          url: 'Organization',
+          // highlight-next-line
+          ifNoneExist: 'identifier=http://example-org.com/organizations|example-organization',
+        },
+      },
+      {
+        fullUrl: 'urn:uuid:37b0dfaa-f320-444f-b658-01a04985b2ce',
+        resource: {
+          resourceType: 'Patient',
+          name: [
+            {
+              use: 'official',
+              family: 'Smith',
+              given: ['Alice'],
+            },
+          ],
+          gender: 'female',
+          birthDate: '1974-12-15',
+          managingOrganization: {
+            reference: 'urn:uuid:4aac5fb6-c2ff-4851-b3cf-d66d63a82a17',
+            display: 'Example Organization',
+          },
+        },
+        request: {
+          method: 'POST',
+          url: 'Patient',
+        },
+      },
+    ],
+  };
+// end-block conditionalCreate
+
+// start-block batchUpserts
+const sourcePatients: Patient[] = [
+  {
+    resourceType: 'Patient',
+    identifier: [{ system: 'https://example.org/source-patients', value: 'P001' }],
+    name: [{ family: 'Doe', given: ['Jane'] }],
+  },
+  {
+    resourceType: 'Patient',
+    identifier: [{ system: 'https://example.org/source-patients', value: 'P002' }],
+    name: [{ family: 'Smith', given: ['Alex'] }],
+  },
+];
+const upsertEntries: BundleEntry[] = sourcePatients.map((resource) => {
+  const identifier = resource.identifier?.[0];
+  if (!identifier?.system || !identifier.value) {
+    throw new Error('Source patient must have a stable identifier');
+  }
+  return {
+    resource,
+    request: {
+      method: 'PUT',
+      url: `Patient?identifier=${encodeURIComponent(`${identifier.system}|${identifier.value}`)}`,
+    },
+  };
+});
+// A request-level failure can throw before returning a result Bundle.
+// Handle it separately; reconcile unknown outcomes (such as timeouts) before retrying.
+// The loop below handles per-entry results only.
+const upsertResults = await medplum.executeBatch({
+  resourceType: 'Bundle',
+  type: 'batch',
+  entry: upsertEntries,
+});
+const retryEntries: BundleEntry[] = [];
+const reviewEntries: { request: BundleEntry; response: BundleEntry | undefined }[] = [];
+for (const [index, request] of upsertEntries.entries()) {
+  const response = upsertResults.entry?.[index];
+  const status = Number.parseInt(response?.response?.status ?? '', 10);
+  if (status >= 200 && status < 300) {
+    continue; // Record success; do not resubmit this entry.
+  }
+  if (status === 429 || (status >= 500 && status < 600)) {
+    retryEntries.push(request); // Retry with a bounded backoff policy.
+  } else {
+    reviewEntries.push({ request, response }); // Includes missing/unknown results.
+  }
+}
+// Persist results, schedule bounded retries, and surface reviewEntries to the operator.
+// end-block batchUpserts
+
+// start-block autobatchingWrong
+// Main thread pauses and waits for Promise to resolve. This request cannot be added to a batch
+await medplum.createResource({
+  resourceType: 'Patient',
+  name: [
+    {
+      family: 'Smith',
+      given: ['John'],
+    },
+  ],
+});
+
+// Main thread pauses and waits for Promise to resolve. This request cannot be added to a batch
+await medplum.createResource({
+  resourceType: 'Patient',
+  name: [
+    {
+      family: 'Simpson',
+      given: ['Homer', 'Jay'],
+    },
+  ],
+});
+// end-block autobatchingWrong
+
+// start-block autobatchingCorrect
+const patientsToCreate = [];
+
+// Main thread continues
+patientsToCreate.push(
+  medplum.createResource({
+    resourceType: 'Patient',
+    name: [
+      {
+        family: 'Smith',
+        given: ['John'],
+      },
+    ],
+  })
+);
+
+// Main thread continues
+patientsToCreate.push(
+  medplum.createResource({
+    resourceType: 'Patient',
+    name: [
+      {
+        family: 'Simpson',
+        given: ['Homer', 'Jay'],
+      },
+    ],
+  })
+);
+
+// Both promises are resolved simultaneously
+await Promise.all(patientsToCreate);
+// end-block autobatchingCorrect
+
+console.log(batchCreate, history, internalReference, externalReference, conditional);

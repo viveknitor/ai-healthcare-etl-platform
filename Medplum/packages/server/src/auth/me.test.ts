@@ -1,0 +1,604 @@
+// SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
+// SPDX-License-Identifier: Apache-2.0
+import { ContentType, createReference, resolveId } from '@medplum/core';
+import type { Binary, ClientApplication, UserConfiguration } from '@medplum/fhirtypes';
+import { randomUUID } from 'crypto';
+import express from 'express';
+import request from 'supertest';
+import { inviteUser } from '../admin/invite';
+import { initApp, shutdownApp } from '../app';
+import { loadTestConfig } from '../config/loader';
+import { getProjectSystemRepo } from '../fhir/repo';
+import { addTestUser, createTestProject, withTestContext } from '../test.setup';
+import { getUserConfigurationMenu } from './me';
+import { registerNew } from './register';
+
+const app = express();
+
+describe('Me', () => {
+  beforeAll(async () => {
+    const config = await loadTestConfig();
+    await initApp(app, config);
+  });
+
+  afterAll(async () => {
+    await shutdownApp();
+  });
+
+  test('Unauthenticated', async () => {
+    const res = await request(app).get('/auth/me');
+    expect(res).toHaveStatus(401);
+  });
+
+  test('User configuration', async () => {
+    const { project, membership, accessToken } = await withTestContext(() =>
+      registerNew({
+        firstName: 'Alexander',
+        lastName: 'Hamilton',
+        projectName: 'Hamilton Project',
+        email: `alex${randomUUID()}@example.com`,
+        password: 'password!@#',
+        remoteAddress: '5.5.5.5',
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/107.0.0.0',
+      })
+    );
+
+    // Get the user profile with default user configuration
+    const res2 = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res2).toHaveStatus(200);
+    expect(res2.body).toBeDefined();
+    expect(res2.body.profile).toBeDefined();
+    expect(res2.body.profile.resourceType).toBe('Practitioner');
+    expect(res2.body.config).toBeDefined();
+    expect(res2.body.config.resourceType).toBe('UserConfiguration');
+
+    // Create a new user configuration
+    const config: UserConfiguration = {
+      resourceType: 'UserConfiguration',
+      menu: [
+        {
+          title: 'My Menu',
+          link: [{ name: 'My Link', target: '/my-target' }],
+        },
+      ],
+    };
+    const res3 = await request(app)
+      .post('/fhir/R4/UserConfiguration')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .type('json')
+      .send(config);
+    expect(res3).toHaveStatus(201);
+    expect(res3.body.resourceType).toBe('UserConfiguration');
+    expect(res3.body.id).toBeDefined();
+    expect(res3.body).toMatchObject(config);
+
+    // Read the project membership
+    const res4 = await request(app)
+      .get(`/admin/projects/${project.id}/members/${membership.id}`)
+      .set('Authorization', 'Bearer ' + accessToken);
+    expect(res4).toHaveStatus(200);
+    expect(res4.body.resourceType).toBe('ProjectMembership');
+
+    // Update the project membership
+    const res5 = await request(app)
+      .post(`/admin/projects/${project.id}/members/${membership.id}`)
+      .set('Authorization', 'Bearer ' + accessToken)
+      .type('json')
+      .send({
+        ...res4.body,
+        userConfiguration: createReference(res3.body),
+      });
+    expect(res5).toHaveStatus(200);
+
+    // As super admin user, add an identifier to the user
+    const systemRepo = await getProjectSystemRepo(project);
+    await systemRepo.patchResource('User', resolveId(res4.body.user) as string, [
+      {
+        op: 'add',
+        path: '/identifier',
+        value: [{ system: 'http://example.com', value: '12345' }],
+      },
+    ]);
+
+    // Reload the user profile with the new user configuration
+    const res6 = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res6).toHaveStatus(200);
+    expect(res6.body).toBeDefined();
+    expect(res6.body.config).toMatchObject(config);
+    expect(res6.body.security).toBeDefined();
+    expect(res6.body.security.mfaRequired).toBe(false);
+    expect(res6.body.security.sessions).toBeDefined();
+    expect(res6.body.security.sessions[0].browser).toBeDefined();
+    expect(res6.body.security.sessions[0].os).toBeDefined();
+    expect(res6.body.user.identifier).toBeDefined();
+    expect(res6.body.user.identifier.length).toBe(1);
+    expect(res6.body.user.identifier[0]).toMatchObject({ system: 'http://example.com', value: '12345' });
+  });
+
+  test('Set default menu', async () => {
+    const { project, membership, accessToken } = await withTestContext(() =>
+      registerNew({
+        firstName: 'Alexander',
+        lastName: 'Hamilton',
+        projectName: 'Hamilton Project',
+        email: `alex${randomUUID()}@example.com`,
+        password: 'password!@#',
+        remoteAddress: '5.5.5.5',
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/107.0.0.0',
+      })
+    );
+
+    // Get the user profile with default user configuration
+    const res2 = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res2).toHaveStatus(200);
+    expect(res2.body).toBeDefined();
+    expect(res2.body.profile).toBeDefined();
+    expect(res2.body.profile.resourceType).toBe('Practitioner');
+    expect(res2.body.config).toBeDefined();
+    expect(res2.body.config.resourceType).toBe('UserConfiguration');
+    expect(res2.body.config.menu).toMatchObject(getUserConfigurationMenu(project, membership));
+
+    // Create a new user configuration
+    const config: UserConfiguration = {
+      resourceType: 'UserConfiguration',
+      option: [{ id: 'fhirQuota', valueInteger: 1000 }],
+    };
+    const res3 = await request(app)
+      .post('/fhir/R4/UserConfiguration')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .type('json')
+      .send(config);
+    expect(res3).toHaveStatus(201);
+    expect(res3.body.resourceType).toBe('UserConfiguration');
+    expect(res3.body.id).toBeDefined();
+    expect(res3.body).toMatchObject(config);
+
+    // Read the project membership
+    const res4 = await request(app)
+      .get(`/admin/projects/${project.id}/members/${membership.id}`)
+      .set('Authorization', 'Bearer ' + accessToken);
+    expect(res4).toHaveStatus(200);
+    expect(res4.body.resourceType).toBe('ProjectMembership');
+
+    // Update the project membership
+    const res5 = await request(app)
+      .post(`/admin/projects/${project.id}/members/${membership.id}`)
+      .set('Authorization', 'Bearer ' + accessToken)
+      .type('json')
+      .send({
+        ...res4.body,
+        userConfiguration: createReference(res3.body),
+      });
+    expect(res5).toHaveStatus(200);
+
+    // Reload the user profile with the new user configuration
+    const res6 = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res6).toHaveStatus(200);
+    expect(res6.body).toBeDefined();
+    expect(res6.body.config.menu).toBeDefined();
+    expect(res2.body.config.menu).toMatchObject(getUserConfigurationMenu(project, membership));
+  });
+
+  test('Get me as ClientApplication without exposing its secrets', async () => {
+    const { client, project } = await withTestContext(() =>
+      registerNew({
+        firstName: 'Client',
+        lastName: 'Test',
+        projectName: 'Client Test',
+        email: `client${randomUUID()}@example.com`,
+        password: 'password!@#',
+      })
+    );
+
+    const retiringSecret = randomUUID();
+    await withTestContext(async () => {
+      const systemRepo = await getProjectSystemRepo(project);
+      await systemRepo.updateResource({ ...client, retiringSecret });
+    });
+
+    const res = await request(app)
+      .get('/auth/me')
+      .set('Authorization', 'Basic ' + Buffer.from(client.id + ':' + client.secret).toString('base64'));
+    expect(res).toHaveStatus(200);
+    expect(res.body.error).toBeUndefined();
+    expect(res.body.profile).toMatchObject({ resourceType: 'ClientApplication', id: client.id });
+    expect(res.body.profile).not.toHaveProperty('secret');
+    expect(res.body.profile).not.toHaveProperty('retiringSecret');
+    const storedClient = await withTestContext(async () => {
+      const systemRepo = await getProjectSystemRepo(project);
+      return systemRepo.readResource<ClientApplication>('ClientApplication', client.id);
+    });
+    expect(storedClient.secret).toBe(client.secret);
+    expect(storedClient.retiringSecret).toBe(retiringSecret);
+  });
+
+  test.each([false, true])('Get me on behalf of a Patient (cross-project: %s)', async (crossProject) => {
+    const { client, project } = await withTestContext(() =>
+      createTestProject({ withClient: true, membership: { admin: true }, superAdmin: crossProject })
+    );
+    const targetProject = crossProject ? (await withTestContext(() => createTestProject())).project : project;
+    const patient = await withTestContext(() =>
+      addTestUser(targetProject, {
+        resourceType: 'Patient',
+        accessPolicy: {
+          resourceType: 'AccessPolicy',
+          compartment: { reference: '%patient' },
+          resource: [{ resourceType: 'Patient' }],
+        },
+      })
+    );
+    const config = await withTestContext(async () => {
+      const systemRepo = await getProjectSystemRepo(targetProject);
+      const config = await systemRepo.createResource<UserConfiguration>({
+        resourceType: 'UserConfiguration',
+        meta: { project: targetProject.id },
+        menu: [{ title: 'Patient menu', link: [{ name: 'Home', target: '/' }] }],
+      });
+      await systemRepo.updateResource({ ...patient.membership, userConfiguration: createReference(config) });
+      return config;
+    });
+
+    const res = await request(app)
+      .get('/auth/me')
+      .set('Authorization', 'Basic ' + Buffer.from(client.id + ':' + client.secret).toString('base64'))
+      .set('X-Medplum-On-Behalf-Of', `ProjectMembership/${patient.membership.id}`);
+    expect(res).toHaveStatus(200);
+    expect(res.body.project.id).toBe(targetProject.id);
+    expect(res.body.profile).toMatchObject({ resourceType: 'Patient', id: patient.profile.id });
+    expect(res.body.membership).toMatchObject({
+      id: patient.membership.id,
+      profile: createReference(patient.profile),
+    });
+    expect(res.body.config).toMatchObject({ id: config.id, menu: config.menu });
+    expect(res.body.accessPolicy.compartment.reference).toBe(`Patient/${patient.profile.id}`);
+    expect(res.body.user).toBeUndefined();
+    expect(res.body.security).toBeUndefined();
+  });
+
+  test('Profile in another project', async () => {
+    const { membership, accessToken } = await withTestContext(() =>
+      registerNew({
+        firstName: 'Alexander',
+        lastName: 'Hamilton',
+        projectName: 'Hamilton Project',
+        email: `alex${randomUUID()}@example.com`,
+        password: 'password!@#',
+      })
+    );
+    const { client } = await withTestContext(() => createTestProject({ withClient: true }));
+
+    const systemRepo = await getProjectSystemRepo(membership.project);
+    await withTestContext(() => systemRepo.updateResource({ ...membership, profile: createReference(client) }));
+
+    const res = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res).toHaveStatus(404);
+    expect(res.text).not.toContain(client.secret);
+  });
+
+  test('UserConfiguration from a linked project', async () => {
+    const { project, membership, accessToken } = await withTestContext(() =>
+      createTestProject({ withClient: true, withAccessToken: true })
+    );
+    const { project: linkedProject } = await withTestContext(() => createTestProject());
+    const systemRepo = await getProjectSystemRepo(project);
+    const linkedConfig = await systemRepo.createResource<UserConfiguration>({
+      resourceType: 'UserConfiguration',
+      meta: { project: linkedProject.id },
+    });
+    const projectlessConfig = await systemRepo.createResource<UserConfiguration>({ resourceType: 'UserConfiguration' });
+    await withTestContext(() =>
+      systemRepo.updateResource({ ...project, link: [{ project: createReference(linkedProject) }] })
+    );
+
+    await withTestContext(() =>
+      systemRepo.updateResource({ ...membership, userConfiguration: createReference(linkedConfig) })
+    );
+    const res = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res).toHaveStatus(200);
+    expect(res.body.config.id).toBe(linkedConfig.id);
+
+    await withTestContext(() =>
+      systemRepo.updateResource({ ...membership, userConfiguration: createReference(projectlessConfig) })
+    );
+    const res2 = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res2).toHaveStatus(400);
+  });
+
+  test('AccessPolicy.basedOn', async () => {
+    const { accessToken, accessPolicy } = await withTestContext(() =>
+      createTestProject({
+        withAccessToken: true,
+        accessPolicy: {
+          resource: [{ resourceType: 'Patient' }],
+        },
+      })
+    );
+
+    const res = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res).toHaveStatus(200);
+    expect(res.body).toBeDefined();
+    expect(res.body.accessPolicy).toBeDefined();
+    expect(res.body.accessPolicy.basedOn).toBeDefined();
+    expect(res.body.accessPolicy.basedOn).toMatchObject([createReference(accessPolicy)]);
+  });
+
+  test('Get user memberships', async () => {
+    const email = `alice${randomUUID()}@example.com`;
+    const password = randomUUID();
+
+    const { project, membership, accessToken } = await withTestContext(() =>
+      registerNew({
+        firstName: 'Alexander',
+        lastName: 'Hamilton',
+        projectName: 'Memberships in /auth/me Part 1',
+        email,
+        password,
+        remoteAddress: '5.5.5.5',
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/107.0.0.0',
+      })
+    );
+
+    // Get the user profile the initial memberships
+    const res1 = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res1).toHaveStatus(200);
+    expect(res1.body).toBeDefined();
+    expect(res1.body.security.memberships).toHaveLength(1);
+    expect(res1.body.security.memberships[0]).toMatchObject({
+      resourceType: 'ProjectMembership',
+      id: membership.id,
+    });
+
+    // Create an additional ProjectMembership for the same user in the same project
+    const inviteResponse = await inviteUser({
+      project,
+      email,
+      password,
+      resourceType: 'Practitioner',
+      firstName: 'Alexander',
+      lastName: 'Hamilton',
+      sendEmail: false,
+      forceNewMembership: true,
+    });
+    expect(inviteResponse).toBeDefined();
+
+    // Reload the user profile with the new user memberships
+    const res2 = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res2).toHaveStatus(200);
+    expect(res2.body).toBeDefined();
+    expect(res2.body.security.memberships).toHaveLength(2);
+
+    // Register a totally separate project
+    await withTestContext(() =>
+      registerNew({
+        firstName: 'Alexander',
+        lastName: 'Hamilton',
+        projectName: 'Memberships in /auth/me Part 2',
+        email,
+        password,
+        remoteAddress: '5.5.5.5',
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/107.0.0.0',
+      })
+    );
+
+    // Reload, should only see the 2 memberships from the original project
+    const res3 = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res3).toHaveStatus(200);
+    expect(res3.body).toBeDefined();
+    expect(res3.body.security.memberships).toHaveLength(2);
+
+    // Mark the 2nd ProjectMembership as inactive
+    const systemRepo = await getProjectSystemRepo(project);
+    await systemRepo.patchResource('ProjectMembership', inviteResponse.membership.id, [
+      {
+        op: 'add',
+        path: '/active',
+        value: false,
+      },
+    ]);
+
+    // Reload, should only see the 1 active membership
+    const res4 = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res4).toHaveStatus(200);
+    expect(res4.body).toBeDefined();
+    expect(res4.body.security.memberships).toHaveLength(1);
+  });
+
+  test('Logins in progress are not listed as sessions', async () => {
+    const email = `alex${randomUUID()}@example.com`;
+    const password = randomUUID();
+
+    const { login, accessToken } = await withTestContext(() =>
+      registerNew({
+        firstName: 'Alexander',
+        lastName: 'Hamilton',
+        projectName: 'Sessions in /auth/me',
+        email,
+        password,
+      })
+    );
+
+    // Sign in again, but do not redeem the code yet
+    const res1 = await request(app)
+      .post('/auth/login')
+      .type('json')
+      .send({ email, password, scope: 'openid', codeChallenge: 'xyz', codeChallengeMethod: 'plain' });
+    expect(res1).toHaveStatus(200);
+    expect(res1.body.code).toBeDefined();
+
+    // The pending login is not listed
+    const res3 = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res3).toHaveStatus(200);
+    expect(res3.body.security.sessions.map((s: any) => s.id)).toStrictEqual([login.id]);
+
+    // Redeem the code
+    const res4 = await request(app)
+      .post('/oauth2/token')
+      .type('form')
+      .send({ grant_type: 'authorization_code', code: res1.body.code, code_verifier: 'xyz' });
+    expect(res4).toHaveStatus(200);
+
+    // Now it is a session
+    const res5 = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res5).toHaveStatus(200);
+    expect(res5.body.security.sessions.map((s: any) => s.id)).toContainExactly([login.id, res1.body.login]);
+  });
+
+  test('SMART-scoped login does not get security details', async () => {
+    const { accessToken } = await withTestContext(() =>
+      registerNew({
+        firstName: 'Alexander',
+        lastName: 'Hamilton',
+        projectName: 'SMART-scoped /auth/me',
+        email: `alex${randomUUID()}@example.com`,
+        password: 'password!@#',
+        scope: 'openid user/Observation.rs',
+      })
+    );
+
+    const res = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res).toHaveStatus(200);
+    expect(res.body.profile).toStrictEqual({
+      resourceType: 'Practitioner',
+      id: resolveId(res.body.membership.profile),
+    });
+    expect(res.body.user).toBeDefined();
+    expect(res.body.security).toBeUndefined();
+  });
+
+  test('Profile hidden fields are removed', async () => {
+    const { project } = await createTestProject();
+    const { accessToken } = await withTestContext(() =>
+      addTestUser(project, {
+        resourceType: 'Patient',
+        accessPolicy: {
+          resourceType: 'AccessPolicy',
+          resource: [{ resourceType: 'Patient', criteria: 'Patient?_id=%profile.id', hiddenFields: ['name'] }],
+        },
+      })
+    );
+
+    const res = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res).toHaveStatus(200);
+    expect(res.body.profile.resourceType).toBe('Patient');
+    expect(res.body.profile.name).toBeUndefined();
+    expect(res.body.profile.meta.project).toBe(project.id);
+  });
+
+  test('Profile returned when access policy does not grant the profile type', async () => {
+    const { project } = await createTestProject();
+    const { accessToken } = await withTestContext(() =>
+      addTestUser(project, {
+        accessPolicy: { resourceType: 'AccessPolicy', resource: [{ resourceType: 'Observation' }] },
+      })
+    );
+
+    const res = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res).toHaveStatus(200);
+    expect(res.body.profile.name).toStrictEqual([{ given: ['Bob'], family: 'Jones' }]);
+  });
+
+  test('Project features are returned in /auth/me', async () => {
+    const email = `alice${randomUUID()}@example.com`;
+    const password = randomUUID();
+
+    const { project, accessToken } = await withTestContext(() =>
+      registerNew({
+        firstName: 'Feature',
+        lastName: 'Test',
+        projectName: 'Feature Test Project',
+        email: email,
+        password: password,
+        remoteAddress: '5.5.5.5',
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/107.0.0.0',
+      })
+    );
+
+    // Set a feature on the project
+    const systemRepo = await getProjectSystemRepo(project);
+    await systemRepo.updateResource({
+      ...project,
+      features: ['bots'],
+    });
+
+    const res = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res).toHaveStatus(200);
+    expect(res.body.project).toMatchObject({
+      resourceType: 'Project',
+      id: project.id,
+    });
+    expect(res.body.project.features).toEqual(['bots']);
+  });
+
+  test('Security mfaRequired reflects project setting', async () => {
+    const email = `mfa${randomUUID()}@example.com`;
+    const password = randomUUID();
+
+    const { project, user, accessToken } = await withTestContext(() =>
+      registerNew({
+        firstName: 'Mfa',
+        lastName: 'Required',
+        projectName: `Mfa Required Project ${randomUUID()}`,
+        email,
+        password,
+        remoteAddress: '5.5.5.5',
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/107.0.0.0',
+      })
+    );
+
+    const systemRepo = await getProjectSystemRepo(project);
+
+    // By default MFA is not required.
+    const res1 = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res1).toHaveStatus(200);
+    expect(res1.body.security.mfaRequired).toBe(false);
+
+    // Enabling the project setting makes MFA required for the user.
+    await withTestContext(() =>
+      systemRepo.updateResource({
+        ...project,
+        setting: [{ name: 'mfaRequired', valueBoolean: true }],
+      })
+    );
+    const res2 = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res2.body.security.mfaRequired).toBe(true);
+
+    // The project requirement is enforced even when the user has explicitly set
+    // `User.mfaRequired` to false; the project setting can only tighten.
+    await withTestContext(() =>
+      systemRepo.updateResource({
+        ...user,
+        mfaRequired: false,
+      })
+    );
+    const res3 = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res3.body.security.mfaRequired).toBe(true);
+  });
+
+  test('Only signs attachments that the user can read', async () => {
+    const { repo, client, accessToken } = await createTestProject({
+      withClient: true,
+      withRepo: true,
+      withAccessToken: true,
+    });
+    const { repo: otherRepo } = await createTestProject({ withRepo: true });
+    const { binary, otherBinary } = await withTestContext(async () => {
+      const binary = await repo.createResource<Binary>({ resourceType: 'Binary', contentType: ContentType.TEXT });
+      const otherBinary = await otherRepo.createResource<Binary>({
+        resourceType: 'Binary',
+        contentType: ContentType.TEXT,
+      });
+      await repo.updateResource({
+        ...client,
+        signInForm: { logo: { url: `Binary/${binary.id}` } },
+        extension: [{ url: `Binary/${otherBinary.id}`, valueBoolean: true }],
+      });
+      return { binary, otherBinary };
+    });
+
+    const res = await request(app).get('/auth/me').set('Authorization', `Bearer ${accessToken}`);
+    expect(res).toHaveStatus(200);
+    expect(res.body.profile.signInForm.logo.url).toContain(`/storage/${binary.id}/`);
+    expect(res.body.profile.signInForm.logo.url).toContain('Signature=');
+    expect(res.body.profile.extension[0].url).toBe(`Binary/${otherBinary.id}`);
+  });
+});

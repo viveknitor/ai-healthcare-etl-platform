@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
+// SPDX-License-Identifier: Apache-2.0
+import react from '@vitejs/plugin-react';
+import { copyFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { defineConfig } from 'vitest/config';
+
+if (!existsSync(resolve(import.meta.dirname, '.env'))) {
+  copyFileSync(resolve(import.meta.dirname, '.env.defaults'), resolve(import.meta.dirname, '.env'));
+}
+
+export default defineConfig({
+  envPrefix: ['MEDPLUM_', 'GOOGLE_', 'RECAPTCHA_'],
+  plugins: [
+    react(),
+    /*
+     * Replace CSS module imports with an identity proxy (see test-mocks/cssModuleProxy.ts).
+     * Jest used identity-obj-proxy for the same purpose: `styles.foo` resolves to "foo"
+     * so components render without parsing or applying real CSS in jsdom.
+     */
+    {
+      name: 'css-module-identity-proxy',
+      enforce: 'pre',
+      resolveId(source) {
+        if (source.endsWith('.module.css')) {
+          return resolve(import.meta.dirname, 'src/test-mocks/cssModuleProxy.ts');
+        }
+        return undefined;
+      },
+    },
+  ],
+  resolve: {
+    alias: [{ find: /^@medplum\/([\w-]+)$/, replacement: resolve(import.meta.dirname, '../$1/src') }],
+  },
+  test: {
+    name: '@medplum/app',
+    maxWorkers: process.env.TEST_MAX_WORKERS ?? '75%',
+    globals: true,
+    environment: 'jsdom',
+    environmentOptions: {
+      jsdom: {
+        /* Base URL for relative links and window.location in component tests. */
+        url: 'http://localhost/',
+      },
+    },
+    setupFiles: ['./src/test.setup.ts'],
+    testTimeout: 120_000,
+    pool: 'threads',
+    fakeTimers: {
+      /*
+       * Advance mocked timers automatically (e.g. debounced search inputs) instead of
+       * requiring manual vi.advanceTimersByTime in every test.
+       */
+      shouldAdvanceTime: true,
+    },
+  },
+});
