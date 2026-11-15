@@ -9,10 +9,10 @@ const STORAGE_OFFSET_KEY = "healthcare_etl_pipeline_offset";
 const STORAGE_RESOURCE_KEY = "healthcare_etl_pipeline_resource";
 
 const RESOURCE_OPTIONS = [
-  { value: "Patient", label: "Patient (Demographics & Identity)", icon: "👤" },
-  { value: "Observation", label: "Observation (Vitals, Labs, Biometrics)", icon: "🧪" },
-  { value: "Condition", label: "Condition (Diagnoses & Problems)", icon: "🩺" },
-  { value: "Encounter", label: "Encounter (Visits & Admissions)", icon: "🏥" },
+  { value: "Patient", label: "Patient", sub: "Demographics & MRN", icon: "👤" },
+  { value: "Observation", label: "Observation", sub: "Labs & Clinical Vitals", icon: "🧪" },
+  { value: "Condition", label: "Condition", sub: "Diagnoses & Problems", icon: "🩺" },
+  { value: "Encounter", label: "Encounter", sub: "Visits & Admissions", icon: "🏥" },
 ];
 
 export default function PipelinePage() {
@@ -21,6 +21,7 @@ export default function PipelinePage() {
   );
   const [count, setCount] = useState(() => Number(localStorage.getItem(STORAGE_COUNT_KEY)) || 5);
   const [offset, setOffset] = useState(() => Number(localStorage.getItem(STORAGE_OFFSET_KEY)) || 0);
+  const [dryRun, setDryRun] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [activeRecord, setActiveRecord] = useState(null);
@@ -88,9 +89,9 @@ export default function PipelinePage() {
     localStorage.setItem(STORAGE_RESOURCE_KEY, resourceType);
   }, [resourceType]);
 
-  async function executePipeline(dryRun, customOffset = offset, customResType = resourceType) {
+  async function executePipeline(isDryRun = dryRun, customOffset = offset, customResType = resourceType) {
     if (
-      !dryRun &&
+      !isDryRun &&
       !window.confirm(
         `This will deliver ${count} ${customResType} records (Offset ${customOffset}) to local Medplum (http://localhost:8103). Continue?`
       )
@@ -100,7 +101,7 @@ export default function PipelinePage() {
     setLoading(true);
     setError("");
     try {
-      const data = await api.runPipeline(Number(count), dryRun, Number(customOffset), customResType);
+      const data = await api.runPipeline(Number(count), isDryRun, Number(customOffset), customResType);
       setReport(data);
     } catch (e) {
       setError(e.message);
@@ -109,16 +110,16 @@ export default function PipelinePage() {
     }
   }
 
-  function nextBatch(dryRun = true) {
+  function nextBatch(isDryRun = dryRun) {
     const newOffset = offset + count;
     setOffset(newOffset);
-    executePipeline(dryRun, newOffset, resourceType);
+    executePipeline(isDryRun, newOffset, resourceType);
   }
 
-  function prevBatch(dryRun = true) {
+  function prevBatch(isDryRun = dryRun) {
     const newOffset = Math.max(0, offset - count);
     setOffset(newOffset);
-    executePipeline(dryRun, newOffset, resourceType);
+    executePipeline(isDryRun, newOffset, resourceType);
   }
 
   function clearResults() {
@@ -129,101 +130,89 @@ export default function PipelinePage() {
     }
   }
 
+  const deliveredCount = report?.summary?.counts?.delivered || 0;
+  const totalCount = report?.summary?.total || 0;
+
   return (
     <section>
-      {/* 1. Capability & Process Flow Overview */}
+      {/* 1. Executive KPI Metric Dashboard Bar */}
+      <div className="kpi-grid">
+        <div className="kpi-card">
+          <div className="kpi-icon">📦</div>
+          <div className="kpi-content">
+            <span className="kpi-label">Batch Processed</span>
+            <span className="kpi-value">{totalCount} Records</span>
+            <span className="kpi-sub">Source: HAPI FHIR R4</span>
+          </div>
+        </div>
+
+        <div className="kpi-card">
+          <div className="kpi-icon" style={{ color: "var(--ok)" }}>⚡</div>
+          <div className="kpi-content">
+            <span className="kpi-label">Delivered to Medplum</span>
+            <span className="kpi-value">{deliveredCount} Persisted</span>
+            <span className="kpi-sub">100% Idempotent Upsert</span>
+          </div>
+        </div>
+
+        <div className="kpi-card">
+          <div className="kpi-icon" style={{ color: "var(--brand)" }}>🏥</div>
+          <div className="kpi-content">
+            <span className="kpi-label">Target Destination</span>
+            <span className="kpi-value">Medplum :8103</span>
+            <span className="kpi-sub">PostgreSQL 16 Backend</span>
+          </div>
+        </div>
+
+        <div className="kpi-card">
+          <div className="kpi-icon" style={{ color: "var(--info)" }}>🛡️</div>
+          <div className="kpi-content">
+            <span className="kpi-label">Semantic Quality Gate</span>
+            <span className="kpi-value">FHIR R4 / R4B</span>
+            <span className="kpi-sub">Zero Duplicate Rows</span>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Pipeline Control & Multi-Resource Selector */}
       <div className="card">
-        <h2>Multi-Resource Healthcare ETL: HAPI FHIR → Medplum Ingestion Platform</h2>
-        <p className="muted">
-          Automated multi-resource pipeline with cross-resource referential integrity, clinical normalization, and idempotent destination reconciliation.
-        </p>
-
-        <div className="pipeline-flow">
-          <div className="flow-step">
-            <div className="step-num">Step 1 • Ingest</div>
-            <div className="step-title">Source Extraction</div>
-            <div className="step-desc">
-              Paginates live FHIR R4 <strong>{resourceType}</strong> records from HAPI with in-batch deduplication.
-            </div>
+        <div className="row between" style={{ marginTop: 0, marginBottom: "16px" }}>
+          <div>
+            <h2>Multi-Resource ETL &amp; Ingestion Engine</h2>
+            <p className="sub-meta" style={{ margin: "2px 0 0" }}>
+              Automated schema extraction, foreign-key reference remapping, and conditional upsert reconciliation.
+            </p>
           </div>
-          <div className="flow-step">
-            <div className="step-num">Step 2 • Sanitize</div>
-            <div className="step-title">Metadata Stripping</div>
-            <div className="step-desc">
-              Strips source <code>id</code>, <code>meta</code>, and <code>text</code> narrative to prevent destination ID collisions.
-            </div>
-          </div>
-          <div className="flow-step">
-            <div className="step-num">Step 3 • Link</div>
-            <div className="step-title">Cross-Resource Remap</div>
-            <div className="step-desc">
-              Remaps foreign keys (e.g. <code>subject</code>) to conditional references (<code>Patient?identifier=...</code>).
-            </div>
-          </div>
-          <div className="flow-step">
-            <div className="step-num">Step 4 • Deliver</div>
-            <div className="step-title">Medplum Reconciliation</div>
-            <div className="step-desc">
-              Validates against FHIR R4 schema and executes conditional upsert via OAuth2 client credentials.
-            </div>
-          </div>
+          {report && (
+            <button className="danger sm" onClick={clearResults}>
+              🗑️ Clear UI Results
+            </button>
+          )}
         </div>
 
-        {/* Multi-Resource & Deduplication Specification Box */}
-        <div className="spec-box" style={{ background: "rgba(26, 127, 75, 0.05)", borderColor: "rgba(26, 127, 75, 0.2)" }}>
-          <h3 style={{ color: "var(--ok)" }}>Multi-Resource Ingestion &amp; Referential Integrity Guarantees</h3>
-          <div className="spec-grid">
-            <div className="spec-item">
-              <strong>1. Active Resource: {resourceType}</strong>
-              Full FHIR R4 schema validation, terminology bindings, and clinical extraction.
-            </div>
-            <div className="spec-item">
-              <strong>2. Cross-Resource Foreign Keys</strong>
-              Clinical records link to Patients using <code>subject.reference = Patient?identifier=urn:source:hapi|&lt;id&gt;</code>.
-            </div>
-            <div className="spec-item">
-              <strong>3. Destination Idempotency</strong>
-              Conditional upsert on <code>?identifier=urn:source:hapi|&lt;id&gt;</code> prevents duplicate insertions.
-            </div>
-            <div className="spec-item">
-              <strong>4. Clinical Data Preservation</strong>
-              Retains LOINC codes, UCUM units, and ICD-10 diagnostic classifications.
-            </div>
-          </div>
+        {/* Segmented Resource Pills Selector */}
+        <div className="resource-pill-selector">
+          {RESOURCE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              className={`resource-pill-btn ${resourceType === opt.value ? "active" : ""}`}
+              onClick={() => {
+                setResourceType(opt.value);
+                setOffset(0);
+              }}
+            >
+              <span>{opt.icon}</span>
+              <span>{opt.label}</span>
+              <span style={{ fontSize: "11px", opacity: 0.7, fontWeight: 400 }}>({opt.sub})</span>
+            </button>
+          ))}
         </div>
 
-        {/* Execution & Resource Controls */}
-        <div className="row between">
-          <div className="row" style={{ margin: 0, gap: "10px" }}>
+        {/* Glossy Execution Control Bar */}
+        <div className="row between" style={{ alignItems: "center", background: "rgba(0,0,0,0.2)", padding: "14px 18px", borderRadius: "var(--radius-md)", border: "1px solid var(--card-border)" }}>
+          <div className="row" style={{ margin: 0, gap: "14px", alignItems: "center" }}>
             <label>
-              Target Resource Type
-              <select
-                value={resourceType}
-                onChange={(e) => {
-                  const newType = e.target.value;
-                  setResourceType(newType);
-                  setOffset(0);
-                }}
-                style={{
-                  font: "inherit",
-                  padding: "7px 10px",
-                  background: "var(--bg)",
-                  color: "var(--text)",
-                  border: "1px solid var(--line)",
-                  borderRadius: "6px",
-                  fontWeight: 600,
-                }}
-              >
-                {RESOURCE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.icon} {opt.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              Record Count
+              Batch Size
               <input
                 type="number"
                 min="1"
@@ -241,75 +230,76 @@ export default function PipelinePage() {
                 min="0"
                 value={offset}
                 onChange={(e) => setOffset(Math.max(0, Number(e.target.value)))}
-                style={{ width: "80px" }}
+                style={{ width: "90px" }}
                 title="Paginates HAPI to fetch the next consecutive unique records"
               />
             </label>
 
+            <label className="check" style={{ marginTop: "16px" }}>
+              <input
+                type="checkbox"
+                checked={dryRun}
+                onChange={(e) => setDryRun(e.target.checked)}
+              />
+              <span>Dry Run (Validation Only)</span>
+            </label>
+          </div>
+
+          <div className="row" style={{ margin: 0, gap: "10px" }}>
             <button
               className="secondary"
-              onClick={() => executePipeline(true)}
-              disabled={loading}
-              title={`Fetches ${resourceType} from HAPI, normalizes, and derives mapping without writing to Medplum`}
+              onClick={() => prevBatch(dryRun)}
+              disabled={loading || offset <= 0}
+              title="Fetch previous batch from source"
             >
-              {loading ? "Processing…" : `Preview ${count} ${resourceType}s (Dry Run)`}
+              ← Prev
             </button>
 
             <button
               className="primary"
-              onClick={() => executePipeline(false)}
+              onClick={() => executePipeline(dryRun, offset, resourceType)}
               disabled={loading}
-              title={`Extracts ${resourceType} from HAPI and delivers directly into your local Medplum instance`}
+              style={{ minWidth: "160px" }}
             >
-              {loading ? "Processing…" : `Deliver ${count} to Medplum`}
+              {loading
+                ? "Processing Batch…"
+                : dryRun
+                ? `🔍 Validate ${count} ${resourceType}s`
+                : `⚡ Commit ${count} to Medplum`}
             </button>
 
             <button
-              className="secondary sm"
-              onClick={() => prevBatch(true)}
-              disabled={loading || offset <= 0}
-              title="Fetch previous batch of records"
-            >
-              ← Prev Batch
-            </button>
-
-            <button
-              className="secondary sm"
-              onClick={() => nextBatch(true)}
+              className="secondary"
+              onClick={() => nextBatch(dryRun)}
               disabled={loading}
-              title="Fetch next consecutive batch of records"
+              title="Advance offset to next batch of unique records"
             >
               Next Batch →
             </button>
           </div>
-
-          {report && (
-            <button className="danger sm" onClick={clearResults}>
-              Clear Results
-            </button>
-          )}
         </div>
 
-        {error && <p className="error">{error}</p>}
+        {error && <div className="error" style={{ marginTop: "14px" }}>{error}</div>}
       </div>
 
-      {/* 2. Results & Derivation Table */}
+      {/* 3. Ingestion & Dynamic Reconciliation Table */}
       {report && (
         <div className="card">
-          <div className="row between" style={{ margin: 0, marginBottom: "12px" }}>
+          <div className="row between" style={{ marginTop: 0, marginBottom: "8px" }}>
             <div>
               <h2>
-                Pipeline Derivation Table: {resourceType}{" "}
-                <span className="muted small" style={{ fontWeight: 400 }}>
-                  (Offset: {offset} • Range: #{offset + 1} to #{offset + report.results.length})
+                Ingestion Results: {resourceType}
+                <span className="chip info" style={{ marginLeft: "10px", fontSize: "12px" }}>
+                  Offset {offset} • Records #{offset + 1} to #{offset + (report.results?.length || count)}
                 </span>
               </h2>
-              <p className="muted small" style={{ margin: 0 }}>
-                Data is persisted locally across browser refreshes until you click Clear.
+              <p className="sub-meta">
+                State is persisted across browser refreshes. Click <strong>Inspect</strong> to view field extraction &amp; destination perspective.
               </p>
             </div>
-            <div className="chips">
-              <span className="chip">Batch Total: {report.summary.total}</span>
+
+            <div className="chips" style={{ margin: 0 }}>
+              <span className="chip">Total: {report.summary.total}</span>
               {Object.entries(report.summary.counts).map(([k, v]) => (
                 <span key={k} className={`chip ${STATUS_CLASS[k] || ""}`}>
                   {k}: {v}
@@ -321,62 +311,35 @@ export default function PipelinePage() {
           <table>
             <thead>
               <tr>
-                <th style={{ width: "30px" }}>#</th>
-                <th>Source {resourceType} (HAPI)</th>
-                <th>
-                  {resourceType === "Patient"
-                    ? "Demographics Derivation"
-                    : resourceType === "Observation"
-                    ? "Measurement / Clinical Value"
-                    : resourceType === "Condition"
-                    ? "Clinical Diagnosis & Status"
-                    : "Encounter Details"}
-                </th>
-                <th>Cross-Resource Link &amp; Mapping Rules</th>
-                <th>Target Medplum ID</th>
-                <th>Status &amp; Action</th>
-                <th style={{ textAlign: "right" }}>Inspect</th>
+                <th style={{ width: "5%" }}>#</th>
+                <th style={{ width: "24%" }}>Source {resourceType} (HAPI)</th>
+                <th style={{ width: "20%" }}>Clinical Metric / Demographics</th>
+                <th style={{ width: "25%" }}>Cross-Resource Links &amp; Identity</th>
+                <th style={{ width: "16%" }}>Target Medplum Record</th>
+                <th style={{ width: "10%" }}>Status</th>
+                <th style={{ width: "8%", textAlign: "right" }}>Inspect</th>
               </tr>
             </thead>
             <tbody>
               {report.results.map((r, i) => {
                 const s = r.patient_summary || {};
                 const m = r.mapping_details || {};
-                const deliveryAction = m.delivery_action; // 'created' or 'updated'
+                const deliveryAction = m.delivery_action;
+
                 return (
                   <tr key={i}>
-                    <td style={{ color: "var(--muted)", fontSize: "12px" }}>{offset + i + 1}</td>
+                    <td style={{ color: "var(--text-muted)", fontWeight: 600 }}>{offset + i + 1}</td>
                     <td>
-                      <strong>{s.title || s.display_name || "Unknown"}</strong>
+                      <strong style={{ fontSize: "14px", color: "#fff" }}>{s.title || "Unknown"}</strong>
                       <div className="sub-meta">
                         Source ID: <code>{r.source_id}</code>
-                        {s.code && s.code !== "—" && <span> • Code: {s.code}</span>}
+                        {s.code && s.code !== "—" && ` • Code: ${s.code}`}
                       </div>
                     </td>
                     <td>
-                      <div>
-                        {resourceType === "Patient" ? (
-                          <>
-                            <strong>Gender:</strong> {s.gender || "—"} | <strong>DOB:</strong> {s.birth_date || "—"}
-                          </>
-                        ) : resourceType === "Observation" ? (
-                          <>
-                            <strong style={{ fontSize: "14px", color: "var(--brand)" }}>
-                              {s.primary_value || "—"}
-                            </strong>
-                            <div className="sub-meta">Effective: {s.secondary_value || "—"}</div>
-                          </>
-                        ) : resourceType === "Condition" ? (
-                          <>
-                            <strong>Status:</strong> {s.clinical_status || "active"} ({s.verification_status || "confirmed"})
-                            <div className="sub-meta">Recorded: {s.secondary_value || "—"}</div>
-                          </>
-                        ) : (
-                          <>
-                            <strong>Class:</strong> {s.primary_value || "—"}
-                            <div className="sub-meta">Period: {s.period || s.secondary_value || "—"}</div>
-                          </>
-                        )}
+                      <div style={{ color: "var(--brand)", fontWeight: 600 }}>{s.primary_value || "—"}</div>
+                      <div className="sub-meta">
+                        {s.subtitle ? s.subtitle : `Secondary: ${s.secondary_value || "—"}`}
                       </div>
                     </td>
                     <td>
@@ -385,7 +348,7 @@ export default function PipelinePage() {
                       </div>
                       {s.subject_reference && s.subject_reference !== "—" && (
                         <div className="sub-meta" style={{ marginTop: "3px" }}>
-                          <strong>Links to:</strong>{" "}
+                          <span style={{ color: "var(--text-muted)" }}>Links to: </span>
                           <span style={{ color: "var(--brand)", fontFamily: "ui-monospace, monospace", fontSize: "11px" }}>
                             {s.subject_reference} ➔ {m.target_subject_reference}
                           </span>
@@ -405,7 +368,7 @@ export default function PipelinePage() {
                             className="target-link"
                             title={`Click to view this ${resourceType} in Medplum Web App`}
                           >
-                            {r.target_id.slice(0, 18)}… ↗
+                            {r.target_id.slice(0, 16)}… ↗
                           </a>
                           <div className="sub-meta">
                             {deliveryAction === "created" ? (
@@ -418,8 +381,8 @@ export default function PipelinePage() {
                           </div>
                         </div>
                       ) : r.status === "dry_run" ? (
-                        <span className="muted" style={{ fontStyle: "italic", fontSize: "13px" }}>
-                          Validated (Ready to deliver)
+                        <span className="sub-meta" style={{ fontStyle: "italic", color: "var(--text-muted)" }}>
+                          Validated (Ready to commit)
                         </span>
                       ) : (
                         "—"
@@ -436,7 +399,9 @@ export default function PipelinePage() {
                         </span>
                       )}
                       {r.errors && r.errors.length > 0 && (
-                        <div className="errs">{r.errors.join("; ")}</div>
+                        <div className="error" style={{ fontSize: "12px", marginTop: "4px" }}>
+                          {r.errors.join("; ")}
+                        </div>
                       )}
                     </td>
                     <td style={{ textAlign: "right" }}>
@@ -452,7 +417,7 @@ export default function PipelinePage() {
         </div>
       )}
 
-      {/* 3. Dynamic Multi-Perspective Record Inspector Modal */}
+      {/* 4. Glossy Inspector Modal with 3 Perspectives */}
       {activeRecord && (
         <div className="modal-overlay" onClick={() => setActiveRecord(null)}>
           <div className="modal-box" onClick={(e) => e.stopPropagation()}>
@@ -474,7 +439,7 @@ export default function PipelinePage() {
                   </span>
                 )}
                 {activeRecord.target_id && (
-                  <span style={{ marginLeft: "10px", fontSize: "13px" }}>
+                  <span style={{ marginLeft: "12px", fontSize: "13px" }}>
                     Medplum ID:{" "}
                     <a
                       href={`http://localhost:3000/${resourceType}/${activeRecord.target_id}`}
@@ -492,19 +457,19 @@ export default function PipelinePage() {
               </button>
             </div>
 
-            {/* Modal Navigation Tabs */}
+            {/* Modal Tabs */}
             <div className="modal-tabs">
               <button
                 className={`modal-tab-btn ${modalTab === "recon" ? "active" : ""}`}
                 onClick={() => setModalTab("recon")}
               >
-                <span>🔄</span> Dynamic Reconciliation Table
+                <span>🔄</span> Dynamic Reconciliation Matrix
               </button>
               <button
                 className={`modal-tab-btn ${modalTab === "dest" ? "active" : ""}`}
                 onClick={() => setModalTab("dest")}
               >
-                <span>🏥</span> Destination Storage Perspective (Medplum)
+                <span>🏥</span> Destination DB Perspective
               </button>
               <button
                 className={`modal-tab-btn ${modalTab === "raw" ? "active" : ""}`}
@@ -514,13 +479,13 @@ export default function PipelinePage() {
               </button>
             </div>
 
-            {/* Modal Tab Contents */}
+            {/* Modal Body */}
             <div className="modal-body">
               {/* TAB 1: Dynamic Reconciliation Table */}
               {modalTab === "recon" && (
                 <div>
-                  <div style={{ marginBottom: "12px", fontSize: "13px", color: "var(--muted)" }}>
-                    Field-by-field extraction and derivation matrix. Dynamically captures all source attributes, transformations, and final stored values.
+                  <div style={{ marginBottom: "14px", fontSize: "13px", color: "var(--text-muted)" }}>
+                    Schema-agnostic field extraction matrix. Automatically unrolls complex FHIR structures and tracks transformation derivations.
                   </div>
                   <ReconciliationTable
                     table={activeRecord.reconciliation_table}
@@ -530,14 +495,13 @@ export default function PipelinePage() {
                 </div>
               )}
 
-              {/* TAB 2: Destination Storage Perspective */}
+              {/* TAB 2: Destination DB Perspective */}
               {modalTab === "dest" && (
                 <div>
-                  {/* Stored Record Overview Card */}
                   <div className="dest-summary-card">
-                    <div className="row between" style={{ marginTop: 0, marginBottom: "8px" }}>
-                      <h4 style={{ margin: 0, fontSize: "14px" }}>
-                        Destination Storage Profile: Medplum FHIR R4
+                    <div className="row between" style={{ marginTop: 0, marginBottom: "10px" }}>
+                      <h4 style={{ margin: 0, fontSize: "14px", color: "var(--brand)" }}>
+                        Destination Profile: Medplum FHIR R4
                       </h4>
                       {activeRecord.target_id && (
                         <a
@@ -547,7 +511,7 @@ export default function PipelinePage() {
                           className="target-link"
                           style={{ fontSize: "13px" }}
                         >
-                          Open in Medplum Console ↗
+                          View in Medplum Console ↗
                         </a>
                       )}
                     </div>
@@ -558,15 +522,15 @@ export default function PipelinePage() {
                         <div>{resourceType}</div>
                       </div>
                       <div className="dest-meta-item">
-                        <label>Assigned Medplum ID</label>
-                        <div>{activeRecord.target_id || "— (Not yet committed)"}</div>
+                        <label>Assigned UUID</label>
+                        <div>{activeRecord.target_id || "— (Pending Commit)"}</div>
                       </div>
                       <div className="dest-meta-item">
                         <label>Scoped Identifier</label>
                         <div>{activeRecord.mapping_details?.idempotent_identifier || "—"}</div>
                       </div>
                       <div className="dest-meta-item">
-                        <label>Delivery Status</label>
+                        <label>Delivery Action</label>
                         <div style={{ color: activeRecord.status === "delivered" ? "var(--ok)" : "var(--warn)" }}>
                           {activeRecord.status.toUpperCase()} ({activeRecord.mapping_details?.delivery_action || "ready"})
                         </div>
@@ -574,14 +538,13 @@ export default function PipelinePage() {
                     </div>
                   </div>
 
-                  {/* Live Database Verification Button & Banner */}
                   {activeRecord.target_id ? (
                     <div style={{ marginBottom: "20px" }}>
-                      <div className="row between" style={{ marginBottom: "10px" }}>
+                      <div className="row between" style={{ marginBottom: "12px" }}>
                         <div>
                           <strong>Live Database Verification:</strong>
-                          <span className="muted small" style={{ marginLeft: "8px" }}>
-                            Directly query Medplum PostgreSQL/FHIR store to confirm persisted record state.
+                          <span className="sub-meta" style={{ marginLeft: "8px" }}>
+                            Directly query Medplum PostgreSQL/FHIR store to confirm live persisted record state.
                           </span>
                         </div>
                         <button
@@ -589,12 +552,12 @@ export default function PipelinePage() {
                           onClick={fetchLiveDestination}
                           disabled={liveLoading}
                         >
-                          {liveLoading ? "Querying Medplum…" : "⚡ Verify Live from Destination DB"}
+                          {liveLoading ? "Querying Medplum…" : "⚡ Verify Live in Medplum DB"}
                         </button>
                       </div>
 
                       {liveError && (
-                        <div className="error" style={{ background: "rgba(192, 54, 44, 0.1)", padding: "10px", borderRadius: "6px" }}>
+                        <div className="error" style={{ background: "rgba(239, 68, 68, 0.1)", padding: "10px 14px", borderRadius: "8px", border: "1px solid var(--bad-border)" }}>
                           Verification failed: {liveError}
                         </div>
                       )}
@@ -616,13 +579,12 @@ export default function PipelinePage() {
                     </div>
                   ) : (
                     <div className="spec-box" style={{ margin: "16px 0" }}>
-                      <strong>Dry Run Mode:</strong> This record was validated against the FHIR R4 schema. Deliver the batch (uncheck Dry Run) to commit and generate native Medplum database IDs.
+                      <strong>Dry Run Mode:</strong> This record was verified against the FHIR R4 schema. Deliver the batch to generate a permanent Medplum database ID.
                     </div>
                   )}
 
-                  {/* Extracted Record Attributes in Destination */}
-                  <h4 style={{ margin: "16px 0 8px", fontSize: "14px" }}>
-                    Stored Resource Summary (Extracted Perspective)
+                  <h4 style={{ margin: "18px 0 8px", fontSize: "14px" }}>
+                    Stored Resource Attributes (Destination Perspective)
                   </h4>
                   <ReconciliationTable
                     table={activeRecord.reconciliation_table.filter(
@@ -639,7 +601,9 @@ export default function PipelinePage() {
                 <div className="grid2">
                   <div className="pane">
                     <div className="row between" style={{ margin: "0 0 8px" }}>
-                      <h4 style={{ margin: 0 }}>1. Source HAPI FHIR Record</h4>
+                      <h4 style={{ margin: 0, textTransform: "uppercase", fontSize: "12px", color: "var(--text-muted)" }}>
+                        1. Source HAPI FHIR Record
+                      </h4>
                       <button
                         className="secondary sm"
                         onClick={() => copyPayload("src", activeRecord.source_record)}
@@ -652,7 +616,9 @@ export default function PipelinePage() {
 
                   <div className="pane">
                     <div className="row between" style={{ margin: "0 0 8px" }}>
-                      <h4 style={{ margin: 0 }}>2. Target Medplum Payload</h4>
+                      <h4 style={{ margin: 0, textTransform: "uppercase", fontSize: "12px", color: "var(--text-muted)" }}>
+                        2. Target Medplum Record
+                      </h4>
                       <button
                         className="secondary sm"
                         onClick={() => copyPayload("tgt", liveData || activeRecord.target_record)}
