@@ -1,4 +1,5 @@
-# Operations & User Guide: Healthcare ETL Platform
+failed
+400: {"resourceType":"OperationOutcome","issue":[{"severity":"error","code":"invalid","details":{"text":"Conditional reference 'Encounter?identifier=urn:source:hapi|enc-fa7aa3029a9ba30e' did not match any resources"},"expression":["Observation.encounter"]}],"extension":[{"url":"https://medplum.com/fhir/S# Operations & User Guide: Healthcare ETL Platform
 
 This guide provides step-by-step instructions for starting, configuring, and operating the Healthcare ETL Platform, including setting up local Medplum, acquiring OAuth2 credentials, and executing pipelines.
 

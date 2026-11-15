@@ -113,10 +113,12 @@ def test_normalize_remaps_cross_resource_reference():
         "id": "obs-1",
         "status": "final",
         "code": {"coding": [{"system": "http://loinc.org", "code": "883-9", "display": "ABO group"}]},
-        "subject": {"reference": "Patient/nhanes-120412"}
+        "subject": {"reference": "Patient/nhanes-120412"},
+        "encounter": {"reference": "Encounter/enc-999"}
     }
     normalized, system, val = normalize_for_target(obs, "hapi")
     assert normalized["subject"]["reference"] == "Patient?identifier=urn:source:hapi|nhanes-120412"
+    assert normalized["encounter"]["reference"] == "Encounter?identifier=urn:source:hapi|enc-999"
     assert "id" not in normalized
     assert normalized["identifier"][-1] == {"system": "urn:source:hapi", "value": "obs-1"}
 

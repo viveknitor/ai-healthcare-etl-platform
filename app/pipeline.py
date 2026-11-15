@@ -457,10 +457,19 @@ def normalize_for_target(resource: dict, source_system: str) -> tuple[dict, str,
     return res, system, value
 
 
-def ensure_parent_resource(hapi: HapiClient, medplum: MedplumClient, ref_str: str, source_name: str) -> None:
-    """If a resource references a parent like 'Patient/123', ensure the parent exists in Medplum before delivery."""
+def ensure_parent_resource(hapi: HapiClient, medplum: MedplumClient, ref_str: str, source_name: str, visited: set | None = None) -> bool:
+    """If a resource references a parent like 'Patient/123' or 'Encounter/456',
+    ensure the parent exists in Medplum before delivery.
+    Recursively resolves dependencies (e.g. Encounter -> Patient).
+    Returns True if parent exists or was successfully created, False otherwise."""
     if not ref_str or "/" not in ref_str or ref_str.startswith("http") or "?" in ref_str:
-        return
+        return False
+    if visited is None:
+        visited = set()
+    if ref_str in visited:
+        return True
+    visited.add(ref_str)
+
     parent_type, parent_id = ref_str.split("/", 1)
     system = f"urn:source:{source_name}"
 
@@ -471,7 +480,7 @@ def ensure_parent_resource(hapi: HapiClient, medplum: MedplumClient, ref_str: st
             headers=medplum._auth_header()
         )
         if chk.status_code == 200 and chk.json().get("entry"):
-            return  # Parent already exists in Medplum
+            return True  # Parent already exists in Medplum
     except Exception:
         pass
 
@@ -480,11 +489,23 @@ def ensure_parent_resource(hapi: HapiClient, medplum: MedplumClient, ref_str: st
         src_resp = hapi.client.get(f"{hapi.base_url}/{parent_type}/{parent_id}")
         if src_resp.status_code == 200:
             parent_raw = src_resp.json()
+
+            # Recursively resolve dependencies of this parent (e.g. Encounter references Patient)
+            for sub_key in ("subject", "patient"):
+                sub_ref = parent_raw.get(sub_key, {}).get("reference")
+                if sub_ref:
+                    ensure_parent_resource(hapi, medplum, sub_ref, source_name, visited)
+
             parent_norm, psys, pval = normalize_for_target(parent_raw, source_name)
             medplum.upsert(parent_norm, psys, pval)
             log.info("Auto-resolved parent", extra={"ctx": {"parent": f"{parent_type}/{parent_id}"}})
+            return True
+        else:
+            log.warning(f"Parent {parent_type}/{parent_id} returned HTTP {src_resp.status_code} from source")
+            return False
     except Exception as e:
         log.warning(f"Could not auto-resolve parent {parent_type}/{parent_id}: {e}")
+        return False
 
 
 def run_hapi_to_medplum(hapi: HapiClient, medplum: MedplumClient | None, *, source_name: str = "hapi",
@@ -547,10 +568,17 @@ def run_hapi_to_medplum(hapi: HapiClient, medplum: MedplumClient | None, *, sour
             ))
             continue
         try:
-            # Auto-resolve parent dependencies (e.g. Patient) if this is a clinical resource
-            subj_ref = src.get("subject", {}).get("reference") or src.get("patient", {}).get("reference")
-            if subj_ref:
-                ensure_parent_resource(hapi, medplum, subj_ref, source_name)
+            # Auto-resolve parent dependencies for all linked references (subject, patient, encounter)
+            for ref_key in ("subject", "patient", "encounter"):
+                ref_obj = src.get(ref_key)
+                if isinstance(ref_obj, dict) and "reference" in ref_obj:
+                    raw_ref = str(ref_obj["reference"])
+                    resolved = ensure_parent_resource(hapi, medplum, raw_ref, source_name)
+                    # If this reference could not be resolved in Medplum (e.g. broken reference on HAPI),
+                    # strip the unresolvable encounter from res so Medplum doesn't reject the record with 400
+                    if not resolved and ref_key == "encounter" and "encounter" in res:
+                        log.warning(f"Stripping unresolvable encounter {raw_ref} to allow clinical ingestion")
+                        del res["encounter"]
 
             out = medplum.upsert(res, system, value)
             is_created = out.get("_is_created", False)
