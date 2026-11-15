@@ -234,18 +234,9 @@ export default function PipelinePage() {
                 title="Paginates HAPI to fetch the next consecutive unique records"
               />
             </label>
-
-            <label className="check" style={{ marginTop: "16px" }}>
-              <input
-                type="checkbox"
-                checked={dryRun}
-                onChange={(e) => setDryRun(e.target.checked)}
-              />
-              <span>Dry Run (Validation Only)</span>
-            </label>
           </div>
 
-          <div className="row" style={{ margin: 0, gap: "10px" }}>
+          <div className="row" style={{ margin: 0, gap: "10px", alignItems: "center" }}>
             <button
               className="secondary"
               onClick={() => prevBatch(dryRun)}
@@ -256,16 +247,29 @@ export default function PipelinePage() {
             </button>
 
             <button
-              className="primary"
-              onClick={() => executePipeline(dryRun, offset, resourceType)}
+              className="secondary"
+              onClick={() => {
+                setDryRun(true);
+                executePipeline(true, offset, resourceType);
+              }}
               disabled={loading}
+              title="Validate batch against FHIR schema without writing to DB"
               style={{ minWidth: "160px" }}
             >
-              {loading
-                ? "Processing Batch…"
-                : dryRun
-                ? `🔍 Validate ${count} ${resourceType}s`
-                : `⚡ Commit ${count} to Medplum`}
+              {loading && dryRun ? "Validating…" : `🔍 Run Dry Run (${count})`}
+            </button>
+
+            <button
+              className="primary success"
+              onClick={() => {
+                setDryRun(false);
+                executePipeline(false, offset, resourceType);
+              }}
+              disabled={loading}
+              title="Deliver and persist batch into Medplum database"
+              style={{ minWidth: "190px" }}
+            >
+              {loading && !dryRun ? "Delivering…" : `⚡ Deliver to Medplum (${count})`}
             </button>
 
             <button

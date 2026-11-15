@@ -475,6 +475,18 @@ button.primary:hover {
   box-shadow: 0 6px 20px rgba(37, 99, 235, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 
+button.success {
+  background: linear-gradient(135deg, #059669 0%, #10b981 50%, #047857 100%);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #fff;
+  box-shadow: 0 4px 15px rgba(16, 185, 129, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+button.success:hover {
+  background: linear-gradient(135deg, #047857 0%, #059669 50%, #065f46 100%);
+  box-shadow: 0 6px 22px rgba(16, 185, 129, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
 button.secondary {
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
