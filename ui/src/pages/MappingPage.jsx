@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api } from "../api.js";
+import ReconciliationTable from "../components/ReconciliationTable.jsx";
 
 const EXAMPLE = {
   member_id: "M1001",
@@ -16,6 +17,7 @@ export default function MappingPage() {
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [resultTab, setResultTab] = useState("table"); // "table" | "json"
 
   function parseSample() {
     try { return JSON.parse(sampleText); } catch { throw new Error("Sample is not valid JSON"); }
@@ -115,7 +117,24 @@ export default function MappingPage() {
 
       {preview && (
         <div className="card">
-          <h2>3. Result</h2>
+          <div className="row between" style={{ marginTop: 0, marginBottom: "10px" }}>
+            <h2>3. Transformation &amp; Reconciliation Result</h2>
+            <div style={{ display: "flex", gap: "6px" }}>
+              <button
+                className={`sm ${resultTab === "table" ? "primary" : "secondary"}`}
+                onClick={() => setResultTab("table")}
+              >
+                🔄 Reconciliation Table
+              </button>
+              <button
+                className={`sm ${resultTab === "json" ? "primary" : "secondary"}`}
+                onClick={() => setResultTab("json")}
+              >
+                📄 Raw Target JSON
+              </button>
+            </div>
+          </div>
+
           <div className="chips">
             <span className={`chip ${preview.mapping_errors.length ? "warn" : "ok"}`}>
               mapping errors {preview.mapping_errors.length}
@@ -124,10 +143,22 @@ export default function MappingPage() {
               FHIR validation {preview.validation_errors.length ? "failed" : "passed"}
             </span>
           </div>
+
           {[...preview.mapping_errors, ...preview.validation_errors].map((e, i) => (
             <p key={i} className="error small">{e}</p>
           ))}
-          <pre>{JSON.stringify(preview.resource, null, 2)}</pre>
+
+          {resultTab === "table" ? (
+            <div style={{ marginTop: "12px" }}>
+              <ReconciliationTable
+                table={preview.reconciliation_table}
+                sourceTitle="Input Source Sample"
+                targetTitle={`Target ${target} Payload`}
+              />
+            </div>
+          ) : (
+            <pre style={{ marginTop: "12px" }}>{JSON.stringify(preview.resource, null, 2)}</pre>
+          )}
         </div>
       )}
     </section>

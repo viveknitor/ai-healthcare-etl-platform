@@ -143,3 +143,41 @@ def test_extract_clinical_summary_observation_and_condition():
     sc = extract_clinical_summary(cond)
     assert sc["title"] == "Hypertension"
     assert "I10" in sc["primary_value"]
+
+
+def test_dynamic_reconciliation_any_schema():
+    from app.pipeline import format_dynamic_value, generate_dynamic_reconciliation, get_field_display_label
+
+    # 1. Custom / Non-FHIR dynamic field labels
+    assert get_field_display_label("birthDate") == "Date of Birth"
+    assert get_field_display_label("custom_health_metric") == "Custom Health Metric"
+    assert get_field_display_label("systolicBloodPressure") == "Systolic Blood Pressure"
+
+    # 2. Format nested dynamic types
+    assert format_dynamic_value({"value": 120, "unit": "mmHg"}) == "120 mmHg"
+    assert format_dynamic_value({"family": "Doe", "given": ["Jane"]}) == "Jane Doe"
+    assert format_dynamic_value({"coding": [{"code": "883-9", "display": "ABO group"}]}) == "ABO group [883-9]"
+
+    # 3. Dynamic reconciliation matrix for arbitrary source and target
+    source_custom = {
+        "member_id": "M99",
+        "patient_name": "Alice Wonderland",
+        "vitals": {"systolic": 118, "diastolic": 76},
+        "notes": "Annual checkup"
+    }
+    target_custom = {
+        "resourceType": "Observation",
+        "identifier": [{"system": "urn:source:custom", "value": "M99"}],
+        "vitals": {"systolic": 118, "diastolic": 76},
+        "status": "final"
+    }
+    matrix = generate_dynamic_reconciliation(source_custom, target_custom, source_name="CustomEHR", target_name="Medplum")
+    field_names = [m["field"] for m in matrix]
+    assert "member_id" in field_names
+    assert "identifier" in field_names
+    assert "vitals" in field_names
+    # Verify status determination
+    vitals_row = next(m for m in matrix if m["field"] == "vitals")
+    assert vitals_row["status"] == "preserved"
+    ident_row = next(m for m in matrix if m["field"] == "identifier")
+    assert ident_row["status"] == "scoped_identity"

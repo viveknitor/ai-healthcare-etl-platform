@@ -17,4 +17,5 @@ export const api = {
     call("/pipelines/hapi-to-medplum", { count, dry_run, offset, resource_type }),
   suggestMapping: (sample, target_resource) => call("/mappings/suggest", { sample, target_resource }),
   transform: (mapping, payload) => call("/transform", { mapping, payload }),
+  getLiveMedplumResource: (resourceType, resourceId) => call(`/medplum/live/${resourceType}/${resourceId}`),
 };

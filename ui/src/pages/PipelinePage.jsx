@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { api } from "../api.js";
+import ReconciliationTable from "../components/ReconciliationTable.jsx";
 
 const STATUS_CLASS = { delivered: "ok", dry_run: "info", invalid: "warn", failed: "bad" };
 const STORAGE_KEY = "healthcare_etl_pipeline_report";
@@ -23,6 +24,39 @@ export default function PipelinePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [activeRecord, setActiveRecord] = useState(null);
+  const [modalTab, setModalTab] = useState("recon"); // "recon" | "dest" | "raw"
+  const [liveData, setLiveData] = useState(null);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveError, setLiveError] = useState("");
+  const [copiedKey, setCopiedKey] = useState("");
+
+  const openInspector = (record) => {
+    setActiveRecord(record);
+    setModalTab("recon");
+    setLiveData(null);
+    setLiveError("");
+    setCopiedKey("");
+  };
+
+  const fetchLiveDestination = async () => {
+    if (!activeRecord?.target_id) return;
+    setLiveLoading(true);
+    setLiveError("");
+    try {
+      const res = await api.getLiveMedplumResource(resourceType, activeRecord.target_id);
+      setLiveData(res.resource);
+    } catch (err) {
+      setLiveError(err.message);
+    } finally {
+      setLiveLoading(false);
+    }
+  };
+
+  const copyPayload = (key, data) => {
+    navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(""), 2000);
+  };
 
   // Persistent report state: survives page reloads until explicitly cleared
   const [report, setReport] = useState(() => {
@@ -406,7 +440,7 @@ export default function PipelinePage() {
                       )}
                     </td>
                     <td style={{ textAlign: "right" }}>
-                      <button className="secondary sm" onClick={() => setActiveRecord(r)}>
+                      <button className="secondary sm" onClick={() => openInspector(r)}>
                         Inspect
                       </button>
                     </td>
@@ -418,10 +452,11 @@ export default function PipelinePage() {
         </div>
       )}
 
-      {/* 3. Side-by-Side Detailed Inspection Modal */}
+      {/* 3. Dynamic Multi-Perspective Record Inspector Modal */}
       {activeRecord && (
         <div className="modal-overlay" onClick={() => setActiveRecord(null)}>
           <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            {/* Modal Header */}
             <div className="modal-header">
               <div>
                 <h3 style={{ margin: 0, marginBottom: "4px" }}>
@@ -457,77 +492,178 @@ export default function PipelinePage() {
               </button>
             </div>
 
+            {/* Modal Navigation Tabs */}
+            <div className="modal-tabs">
+              <button
+                className={`modal-tab-btn ${modalTab === "recon" ? "active" : ""}`}
+                onClick={() => setModalTab("recon")}
+              >
+                <span>🔄</span> Dynamic Reconciliation Table
+              </button>
+              <button
+                className={`modal-tab-btn ${modalTab === "dest" ? "active" : ""}`}
+                onClick={() => setModalTab("dest")}
+              >
+                <span>🏥</span> Destination Storage Perspective (Medplum)
+              </button>
+              <button
+                className={`modal-tab-btn ${modalTab === "raw" ? "active" : ""}`}
+                onClick={() => setModalTab("raw")}
+              >
+                <span>📄</span> Raw JSON Payloads
+              </button>
+            </div>
+
+            {/* Modal Tab Contents */}
             <div className="modal-body">
-              <div className="grid3">
-                {/* Left: Source Record */}
-                <div className="pane">
-                  <h4>1. Source HAPI FHIR Record</h4>
-                  <p className="muted small" style={{ margin: "0 0 6px" }}>
-                    Raw extracted JSON payload from HAPI.
-                  </p>
-                  <pre>{JSON.stringify(activeRecord.source_record || {}, null, 2)}</pre>
+              {/* TAB 1: Dynamic Reconciliation Table */}
+              {modalTab === "recon" && (
+                <div>
+                  <div style={{ marginBottom: "12px", fontSize: "13px", color: "var(--muted)" }}>
+                    Field-by-field extraction and derivation matrix. Dynamically captures all source attributes, transformations, and final stored values.
+                  </div>
+                  <ReconciliationTable
+                    table={activeRecord.reconciliation_table}
+                    sourceTitle="Source Payload (HAPI)"
+                    targetTitle="Target Stored (Medplum)"
+                  />
                 </div>
+              )}
 
-                {/* Middle: Derivation Rules */}
-                <div className="pane">
-                  <h4>2. Transformation Derivations</h4>
-                  <p className="muted small" style={{ margin: "0 0 6px" }}>
-                    Rules executed by ETL pipeline.
-                  </p>
-                  <ul className="rule-list">
-                    <li>
-                      <strong>Target Resource:</strong> {activeRecord.mapping_details?.target_resource || resourceType} (FHIR R4)
-                    </li>
-                    <li>
-                      <strong>Idempotent Identifier:</strong>
-                      <br />
-                      <code>{activeRecord.mapping_details?.idempotent_identifier}</code>
-                    </li>
-                    <li>
-                      <strong>Conditional Upsert Query:</strong>
-                      <br />
-                      <code>PUT /fhir/R4/{resourceType}{activeRecord.mapping_details?.conditional_query}</code>
-                    </li>
-                    {activeRecord.patient_summary?.subject_reference !== "—" && (
-                      <li>
-                        <strong>Cross-Resource Remapping:</strong>
-                        <br />
-                        Source Link: <code>{activeRecord.patient_summary?.subject_reference}</code>
-                        <br />
-                        Target Conditional Ref: <code>{activeRecord.mapping_details?.target_subject_reference}</code>
-                      </li>
+              {/* TAB 2: Destination Storage Perspective */}
+              {modalTab === "dest" && (
+                <div>
+                  {/* Stored Record Overview Card */}
+                  <div className="dest-summary-card">
+                    <div className="row between" style={{ marginTop: 0, marginBottom: "8px" }}>
+                      <h4 style={{ margin: 0, fontSize: "14px" }}>
+                        Destination Storage Profile: Medplum FHIR R4
+                      </h4>
+                      {activeRecord.target_id && (
+                        <a
+                          href={`http://localhost:3000/${resourceType}/${activeRecord.target_id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="target-link"
+                          style={{ fontSize: "13px" }}
+                        >
+                          Open in Medplum Console ↗
+                        </a>
+                      )}
+                    </div>
+
+                    <div className="dest-meta-grid">
+                      <div className="dest-meta-item">
+                        <label>Target Resource</label>
+                        <div>{resourceType}</div>
+                      </div>
+                      <div className="dest-meta-item">
+                        <label>Assigned Medplum ID</label>
+                        <div>{activeRecord.target_id || "— (Not yet committed)"}</div>
+                      </div>
+                      <div className="dest-meta-item">
+                        <label>Scoped Identifier</label>
+                        <div>{activeRecord.mapping_details?.idempotent_identifier || "—"}</div>
+                      </div>
+                      <div className="dest-meta-item">
+                        <label>Delivery Status</label>
+                        <div style={{ color: activeRecord.status === "delivered" ? "var(--ok)" : "var(--warn)" }}>
+                          {activeRecord.status.toUpperCase()} ({activeRecord.mapping_details?.delivery_action || "ready"})
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Live Database Verification Button & Banner */}
+                  {activeRecord.target_id ? (
+                    <div style={{ marginBottom: "20px" }}>
+                      <div className="row between" style={{ marginBottom: "10px" }}>
+                        <div>
+                          <strong>Live Database Verification:</strong>
+                          <span className="muted small" style={{ marginLeft: "8px" }}>
+                            Directly query Medplum PostgreSQL/FHIR store to confirm persisted record state.
+                          </span>
+                        </div>
+                        <button
+                          className="primary sm"
+                          onClick={fetchLiveDestination}
+                          disabled={liveLoading}
+                        >
+                          {liveLoading ? "Querying Medplum…" : "⚡ Verify Live from Destination DB"}
+                        </button>
+                      </div>
+
+                      {liveError && (
+                        <div className="error" style={{ background: "rgba(192, 54, 44, 0.1)", padding: "10px", borderRadius: "6px" }}>
+                          Verification failed: {liveError}
+                        </div>
+                      )}
+
+                      {liveData && (
+                        <div className="live-verify-banner">
+                          <div>
+                            <span style={{ color: "var(--ok)", fontWeight: 700, fontSize: "14px" }}>
+                              ✓ Confirmed Live in Medplum Database!
+                            </span>
+                            <div className="sub-meta">
+                              Version ID: <code>{liveData.meta?.versionId || "1"}</code> • Last Updated:{" "}
+                              <code>{liveData.meta?.lastUpdated || "Just now"}</code> • ID: <code>{liveData.id}</code>
+                            </div>
+                          </div>
+                          <span className="chip ok">Verified in DB</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="spec-box" style={{ margin: "16px 0" }}>
+                      <strong>Dry Run Mode:</strong> This record was validated against the FHIR R4 schema. Deliver the batch (uncheck Dry Run) to commit and generate native Medplum database IDs.
+                    </div>
+                  )}
+
+                  {/* Extracted Record Attributes in Destination */}
+                  <h4 style={{ margin: "16px 0 8px", fontSize: "14px" }}>
+                    Stored Resource Summary (Extracted Perspective)
+                  </h4>
+                  <ReconciliationTable
+                    table={activeRecord.reconciliation_table.filter(
+                      (r) => r.status !== "dropped" && r.status !== "sanitized"
                     )}
-                    <li>
-                      <strong>Sanitization:</strong>
-                      <br />
-                      Removed <code>id</code>, <code>meta</code>, and <code>text</code> narrative.
-                    </li>
-                    <li>
-                      <strong>Clinical Data Extracted:</strong>
-                      <br />
-                      Title: {activeRecord.patient_summary?.title}
-                      <br />
-                      Primary Value: {activeRecord.patient_summary?.primary_value}
-                      <br />
-                      Secondary: {activeRecord.patient_summary?.secondary_value}
-                    </li>
-                    <li>
-                      <strong>Validation:</strong>
-                      <br />
-                      Verified against official FHIR R4 schema definitions.
-                    </li>
-                  </ul>
+                    sourceTitle="Input Source"
+                    targetTitle="Committed in Medplum"
+                  />
                 </div>
+              )}
 
-                {/* Right: Target Record */}
-                <div className="pane">
-                  <h4>3. Target Medplum Payload</h4>
-                  <p className="muted small" style={{ margin: "0 0 6px" }}>
-                    Normalized resource delivered to Medplum.
-                  </p>
-                  <pre>{JSON.stringify(activeRecord.target_record || {}, null, 2)}</pre>
+              {/* TAB 3: Raw JSON Payloads */}
+              {modalTab === "raw" && (
+                <div className="grid2">
+                  <div className="pane">
+                    <div className="row between" style={{ margin: "0 0 8px" }}>
+                      <h4 style={{ margin: 0 }}>1. Source HAPI FHIR Record</h4>
+                      <button
+                        className="secondary sm"
+                        onClick={() => copyPayload("src", activeRecord.source_record)}
+                      >
+                        {copiedKey === "src" ? "✓ Copied" : "Copy Source JSON"}
+                      </button>
+                    </div>
+                    <pre>{JSON.stringify(activeRecord.source_record || {}, null, 2)}</pre>
+                  </div>
+
+                  <div className="pane">
+                    <div className="row between" style={{ margin: "0 0 8px" }}>
+                      <h4 style={{ margin: 0 }}>2. Target Medplum Payload</h4>
+                      <button
+                        className="secondary sm"
+                        onClick={() => copyPayload("tgt", liveData || activeRecord.target_record)}
+                      >
+                        {copiedKey === "tgt" ? "✓ Copied" : "Copy Target JSON"}
+                      </button>
+                    </div>
+                    <pre>{JSON.stringify(liveData || activeRecord.target_record || {}, null, 2)}</pre>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         </div>

@@ -117,7 +117,11 @@ Open **[http://localhost:5173](http://localhost:5173)** in your browser.
 2. Choose your **Record Count** (e.g. `5` or `10`).
 3. **Step 1 (Preview):** Click **`Preview (Dry Run)`** to view the source extraction and mapping derivation rules without writing to Medplum.
 4. **Step 2 (Delivery):** Click **`Deliver to Medplum`** to execute the live conditional upsert.
-5. **Inspect Mapping:** Click **Inspect** on any row to see the side-by-side JSON comparison and foreign-key link derivation.
+5. **Inspect Dynamic Mapping & Extraction Matrix:**
+   - Click **`Inspect`** on any row to open the 3-tab inspector:
+     - **Tab 1: 🔄 Dynamic Reconciliation Table:** Field-by-field extraction comparing source payload vs target stored values, with derivation rules and status badges (`Preserved`, `Transformed`, `Scoped ID`, `Remapped Ref`, `Sanitized`).
+     - **Tab 2: 🏥 Destination Storage Perspective:** View the resource from the target Medplum perspective. Click **`⚡ Verify Live from Destination DB`** to issue a live FHIR query to verify the persisted record state and version ID in real time.
+     - **Tab 3: 📄 Raw JSON Payloads:** Side-by-side view with one-click copy buttons for source and target JSON.
 6. **Persistence:** Refresh the browser—notice your table data persists until you click **`Clear Results`**.
 
 ---

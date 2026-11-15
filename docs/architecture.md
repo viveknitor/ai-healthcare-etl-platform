@@ -100,6 +100,15 @@ Clinical resources (`Observation`, `Condition`, `Encounter`) possess foreign-key
   - If match count = 1: Updates the existing resource in-place (`200 OK`).
   - Re-running the pipeline 100 times results in **0 duplicate rows** in the destination database.
 
+### 3.7. Schema-Agnostic Dynamic Extraction & Reconciliation Engine (`app/pipeline.py` & `ui/src/components/ReconciliationTable.jsx`)
+- **Universal Field Extractor (`format_dynamic_value`):** Recursively decodes nested FHIR structures (`HumanName`, `CodeableConcept`, `Quantity`, `Reference`, `Identifier`, `Period`, `Address`, `ContactPoint`) and arbitrary nested JSON payloads into human-readable text.
+- **Dynamic Field Labeling (`get_field_display_label`):** Translates camelCase and snake_case field keys into clean clinical titles, operating with zero hardcoding across ANY source, destination, or resource category.
+- **Reconciliation & Derivation Matrix:**
+  - Dynamic union of source and destination key spaces.
+  - Automatically identifies field disposition: `preserved`, `transformed`, `scoped_identity`, `remapped_reference`, `sanitized`, `generated`, or `dropped`.
+- **Live Database Verification (`GET /medplum/live/{resource_type}/{resource_id}`):**
+  - Allows instantaneous live query verification against the Medplum FHIR R4 server to confirm live commit timestamp, version ID, and persisted schema attributes.
+
 ---
 
 ## 4. End-to-End Clinical Data Flow
