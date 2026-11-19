@@ -360,5 +360,41 @@ def test_extension_primitive_type_coercion():
     assert isinstance(res["extension"][2]["valueBoolean"], bool)
 
 
+def test_dynamic_date_transform_handles_sql_server_and_arbitrary_formats():
+    """Verify that date transform automatically handles SQL Server milliseconds (00:00:00.000),
+    ISO timestamps, and US dates dynamically without requiring manual format configs."""
+    from app.mapping.engine import apply_mapping
+    from app.mapping.models import MappingConfig
+    from app.validation import validate_fhir
+
+    mapping = MappingConfig(
+        name="test_date_dynamic",
+        target_resource="Patient",
+        status="approved",
+        rules=[
+            {"source": "id", "target": "identifier[0].value"},
+            {"source": "dob", "target": "birthDate", "transform": "date"},
+        ]
+    )
+
+    test_dates = [
+        "1988-04-12 00:00:00.000",
+        "1988-04-12 00:00:00",
+        "1988-04-12T00:00:00.000Z",
+        "1988-04-12",
+        "04/12/1988",
+        "1988/04/12",
+        "19880412",
+    ]
+
+    for d_str in test_dates:
+        row = {"id": "1", "dob": d_str}
+        res, errors = apply_mapping(mapping, row)
+        assert errors == [], f"Failed on date {d_str}: {errors}"
+        assert res["birthDate"] == "1988-04-12", f"Failed on date {d_str}: got {res.get('birthDate')}"
+        assert validate_fhir(res) == []
+
+
+
 
 

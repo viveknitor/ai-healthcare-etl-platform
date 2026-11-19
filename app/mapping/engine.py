@@ -54,9 +54,79 @@ def set_path(obj: dict, path: str, value: Any) -> None:
                 cur = cur.setdefault(tok, [] if isinstance(nxt, int) else {})
 
 
+_COMMON_DATE_FORMATS = [
+    "%Y-%m-%d %H:%M:%S.%f",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%dT%H:%M:%S.%fZ",
+    "%Y-%m-%dT%H:%M:%SZ",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d",
+    "%m/%d/%Y %H:%M:%S",
+    "%m/%d/%Y",
+    "%d/%m/%Y",
+    "%Y/%m/%d",
+    "%Y%m%d",
+    "%d-%m-%Y",
+    "%b %d, %Y",
+    "%B %d, %Y",
+]
+
+
 def _date(v: Any, args: dict) -> str:
-    fmt = args.get("from", "%Y-%m-%d")
-    return datetime.strptime(str(v), fmt).strftime("%Y-%m-%d")
+    """Robust, dynamic date parser that automatically normalizes SQL Server, ISO, US,
+    and arbitrary date/datetime strings to standard FHIR date format (YYYY-MM-DD)."""
+    if v is None:
+        return ""
+    s = str(v).strip()
+    if not s:
+        return ""
+
+    to_fmt = args.get("to", "%Y-%m-%d")
+    from_fmt = args.get("from")
+
+    # If explicit 'from' format was specified in rule
+    if from_fmt:
+        # First try exact match
+        try:
+            return datetime.strptime(s, from_fmt).strftime(to_fmt)
+        except ValueError:
+            pass
+        # If 'from' is %Y-%m-%d, also accept SQL Server / ISO datetime strings starting with YYYY-MM-DD
+        if from_fmt == "%Y-%m-%d":
+            m = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})", s)
+            if m:
+                y, mon, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                return f"{y:04d}-{mon:02d}-{d:02d}"
+        raise MappingError(f"date {s!r} does not match expected format {from_fmt!r}")
+
+    # No explicit 'from' specified -> fully dynamic detection
+    # 1. Fast regex for ISO / SQL Server timestamps: '1988-04-12 00:00:00.000', '1988-04-12T00:00:00', '1988/04/12'
+    m_iso = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})", s)
+    if m_iso:
+        y, mon, d = int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3))
+        return f"{y:04d}-{mon:02d}-{d:02d}"
+
+    # 2. Fast regex for US format: '04/12/1988 00:00:00' or '04-12-1988'
+    m_us = re.match(r"^(\d{1,2})[-/](\d{1,2})[-/](\d{4})", s)
+    if m_us:
+        mon, d, y = int(m_us.group(1)), int(m_us.group(2)), int(m_us.group(3))
+        return f"{y:04d}-{mon:02d}-{d:02d}"
+
+    # 3. Standard fromisoformat
+    try:
+        clean_iso = s.replace("Z", "+00:00")
+        return datetime.fromisoformat(clean_iso).strftime(to_fmt)
+    except Exception:
+        pass
+
+    # 4. Formats fallback
+    for fmt in _COMMON_DATE_FORMATS:
+        try:
+            return datetime.strptime(s, fmt).strftime(to_fmt)
+        except Exception:
+            pass
+
+    raise MappingError(f"cannot parse date {s!r}")
 
 
 def _map(v: Any, args: dict) -> Any:
