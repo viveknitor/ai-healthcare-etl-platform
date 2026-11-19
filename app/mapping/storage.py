@@ -51,3 +51,4 @@ def save_mapping(cfg: MappingConfig, filename: str | None = None) -> str:
     p = MAPPINGS_DIR / filename
     p.write_text(json.dumps(cfg.model_dump(), indent=2), encoding="utf-8")
     return filename
+

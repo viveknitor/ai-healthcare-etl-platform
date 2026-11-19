@@ -205,3 +205,4 @@ def ingest_uploaded_records(
         "summary": {"total": len(results), "counts": counts},
         "results": [asdict(r) for r in results],
     }
+

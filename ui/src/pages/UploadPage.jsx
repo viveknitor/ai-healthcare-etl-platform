@@ -11,8 +11,19 @@ const SAMPLE_PLANDATA_ROWS = [
     status: "ACTIVE",
     sex: "M",
     fullname: "Quincy Kowalski",
+    ssn: "[REDACTED_SOCIAL_SECURITY_NUMBER_1]",
+    dob: "1968-05-23",
+    deathdate: "",
+    marital: "M",
+    primarylanguage: "en",
+    multiplebirth: "0",
     headofhouse: "MEM-100231",
     guardian: "MEM-100231",
+    ExternalId: "EXT-8812",
+    secondaryid: "SEC-101",
+    enterpriseid: "EMP-900",
+    obs_ethnicid: "HISPANIC",
+    isvip: "0",
   },
   {
     memid: "MEM-100232",
@@ -20,8 +31,19 @@ const SAMPLE_PLANDATA_ROWS = [
     status: "ACTIVE",
     sex: "F",
     fullname: "Elena Rostova",
+    ssn: "[REDACTED_SOCIAL_SECURITY_NUMBER_2]",
+    dob: "1975-11-14",
+    deathdate: "",
+    marital: "M",
+    primarylanguage: "es",
+    multiplebirth: "0",
     headofhouse: "MEM-100231",
     guardian: "MEM-100231",
+    ExternalId: "EXT-8813",
+    secondaryid: "SEC-102",
+    enterpriseid: "EMP-901",
+    obs_ethnicid: "WHITE",
+    isvip: "0",
   },
   {
     memid: "MEM-100233",
@@ -29,17 +51,19 @@ const SAMPLE_PLANDATA_ROWS = [
     status: "TERM",
     sex: "M",
     fullname: "Marcus Vance",
+    ssn: "[REDACTED_SOCIAL_SECURITY_NUMBER_3]",
+    dob: "1982-03-30",
+    deathdate: "",
+    marital: "S",
+    primarylanguage: "en",
+    multiplebirth: "0",
     headofhouse: "MEM-100233",
     guardian: "MEM-100233",
-  },
-  {
-    memid: "MEM-100234",
-    entityid: "ENT-9942",
-    status: "ACTIVE",
-    sex: "F",
-    fullname: "Sophia Chen",
-    headofhouse: "MEM-100234",
-    guardian: "MEM-100234",
+    ExternalId: "EXT-8814",
+    secondaryid: "SEC-103",
+    enterpriseid: "EMP-902",
+    obs_ethnicid: "BLACK",
+    isvip: "1",
   },
 ];
 
@@ -289,100 +313,180 @@ export default function UploadPage() {
       </div>
 
       {/* 3. AI Synthesized Mapping Rules Gate */}
-      {mapping && (
-        <div className="card">
-          <div className="row between" style={{ marginTop: 0, marginBottom: "12px" }}>
-            <div>
-              <h3 style={{ margin: 0, fontSize: "15px" }}>
-                2. AI Synthesized Mapping Contract: <code>{mapping.name}</code>
-              </h3>
-              <p className="sub-meta">
-                Gemini 3.5 Flash detected column semantics and synthesized FHIR R4 transformation rules automatically.
-              </p>
+      {mapping && (() => {
+        const mappedSources = new Set(mapping?.rules?.map((r) => r.source) || []);
+        const allHeaders = fileData?.headers || [];
+        const unmappedHeaders = allHeaders.filter((h) => !mappedSources.has(h));
+
+        return (
+          <div className="card">
+            <div className="row between" style={{ marginTop: 0, marginBottom: "12px" }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: "15px" }}>
+                  2. AI Synthesized Mapping Contract: <code>{mapping.name}</code>
+                </h3>
+                <p className="sub-meta">
+                  Google Gemini detected column semantics and synthesized FHIR R4 transformation rules automatically.
+                </p>
+              </div>
+              <span className={`chip ${approved ? "ok" : "warn"}`}>
+                {approved ? "✓ Approved" : "Pending Review"}
+              </span>
             </div>
-            <span className={`chip ${approved ? "ok" : "warn"}`}>
-              {approved ? "✓ Approved" : "Pending Review"}
-            </span>
-          </div>
 
-          <table>
-            <thead>
-              <tr>
-                <th style={{ width: "22%" }}>Source Column</th>
-                <th style={{ width: "30%" }}>Target FHIR Path</th>
-                <th style={{ width: "20%" }}>Transform</th>
-                <th style={{ width: "12%" }}>Confidence</th>
-                <th style={{ width: "10%", textAlign: "right" }} />
-              </tr>
-            </thead>
-            <tbody>
-              {mapping.rules?.map((r, i) => (
-                <tr key={i} title={r.rationale || ""}>
-                  <td>
-                    <input
-                      value={r.source}
-                      onChange={(e) => editRule(i, "source", e.target.value)}
-                      style={{ padding: "4px 8px", fontSize: "12px", width: "100%" }}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      value={r.target}
-                      onChange={(e) => editRule(i, "target", e.target.value)}
-                      style={{ padding: "4px 8px", fontSize: "12px", width: "100%" }}
-                    />
-                  </td>
-                  <td>
-                    <code style={{ fontSize: "11px", color: "var(--brand)" }}>{r.transform}</code>
-                  </td>
-                  <td>
-                    {r.confidence != null && (
-                      <span className={`chip ${r.confidence >= 0.8 ? "ok" : "warn"}`} style={{ fontSize: "11px", padding: "1px 6px" }}>
-                        {Math.round(r.confidence * 100)}%
-                      </span>
-                    )}
-                  </td>
-                  <td style={{ textAlign: "right" }}>
-                    <button className="link" onClick={() => removeRule(i)} style={{ color: "var(--bad)" }}>
-                      ✕
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <div className="row between" style={{ marginTop: "16px" }}>
-            <button
-              className={approved ? "secondary" : "primary"}
-              onClick={approveMapping}
-              disabled={approved}
+            {/* Field Coverage Analysis Bar */}
+            <div
+              style={{
+                background: "rgba(0,0,0,0.25)",
+                padding: "12px 16px",
+                borderRadius: "var(--radius-md)",
+                marginBottom: "14px",
+                border: "1px solid var(--card-border)",
+              }}
             >
-              {approved ? "✓ Schema Approved & Saved" : "✓ Approve & Save Mapping"}
-            </button>
+              <div className="row between" style={{ margin: 0 }}>
+                <div>
+                  <strong>Field Coverage Analysis: </strong>
+                  <span style={{ color: "var(--ok)", fontWeight: 700 }}>
+                    {mappedSources.size} Mapped
+                  </span>
+                  {" • "}
+                  <span
+                    style={{
+                      color: unmappedHeaders.length > 0 ? "var(--warn)" : "var(--ok)",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {unmappedHeaders.length} Unmapped / Skipped
+                  </span>
+                  {" / "}
+                  <span>{allHeaders.length} Total Columns</span>
+                </div>
+                <span className={`chip ${unmappedHeaders.length === 0 ? "ok" : "warn"}`}>
+                  {Math.round((mappedSources.size / Math.max(1, allHeaders.length)) * 100)}% Coverage
+                </span>
+              </div>
 
-            <div className="row" style={{ margin: 0, gap: "10px" }}>
+              {unmappedHeaders.length > 0 && (
+                <div style={{ marginTop: "8px", fontSize: "12px" }}>
+                  <span style={{ color: "var(--text-muted)" }}>
+                    Unmapped / Skipped Columns (Click to add as FHIR Extension):{" "}
+                  </span>
+                  {unmappedHeaders.map((col) => (
+                    <span
+                      key={col}
+                      className="rule-tag"
+                      style={{
+                        cursor: "pointer",
+                        background: "rgba(245, 158, 11, 0.1)",
+                        color: "var(--warn)",
+                        borderColor: "rgba(245, 158, 11, 0.3)",
+                      }}
+                      onClick={() => {
+                        const newRule = {
+                          source: col,
+                          target: `extension[${mapping.rules.length}].valueString`,
+                          transform: "direct",
+                          confidence: 0.85,
+                          rationale: `Mapped ${col} as custom extension`,
+                        };
+                        setMapping({
+                          ...mapping,
+                          status: "pending_review",
+                          rules: [...mapping.rules, newRule],
+                        });
+                      }}
+                      title={`Click to map "${col}" as a FHIR Extension`}
+                    >
+                      + {col}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ width: "22%" }}>Source Column</th>
+                  <th style={{ width: "30%" }}>Target FHIR Path</th>
+                  <th style={{ width: "20%" }}>Transform</th>
+                  <th style={{ width: "12%" }}>Confidence</th>
+                  <th style={{ width: "10%", textAlign: "right" }} />
+                </tr>
+              </thead>
+              <tbody>
+                {mapping.rules?.map((r, i) => (
+                  <tr key={i} title={r.rationale || ""}>
+                    <td>
+                      <input
+                        value={r.source}
+                        onChange={(e) => editRule(i, "source", e.target.value)}
+                        style={{ padding: "4px 8px", fontSize: "12px", width: "100%" }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={r.target}
+                        onChange={(e) => editRule(i, "target", e.target.value)}
+                        style={{ padding: "4px 8px", fontSize: "12px", width: "100%" }}
+                      />
+                    </td>
+                    <td>
+                      <code style={{ fontSize: "11px", color: "var(--brand)" }}>{r.transform}</code>
+                    </td>
+                    <td>
+                      {r.confidence != null && (
+                        <span
+                          className={`chip ${r.confidence >= 0.8 ? "ok" : "warn"}`}
+                          style={{ fontSize: "11px", padding: "1px 6px" }}
+                        >
+                          {Math.round(r.confidence * 100)}%
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      <button className="link" onClick={() => removeRule(i)} style={{ color: "var(--bad)" }}>
+                        ✕
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div className="row between" style={{ marginTop: "16px" }}>
               <button
-                className="secondary"
-                onClick={() => runIngestion(true)}
-                disabled={!approved || !!busy}
+                className={approved ? "secondary" : "primary"}
+                onClick={approveMapping}
+                disabled={approved}
               >
-                {busy === "validating" ? "Validating…" : `🔍 Run Dry Run (${fileData?.total_rows || 0})`}
+                {approved ? "✓ Schema Approved & Saved" : "✓ Approve & Save Mapping"}
               </button>
 
-              <button
-                className="primary success"
-                onClick={() => runIngestion(false)}
-                disabled={!approved || !!busy}
-              >
-                {busy === "delivering"
-                  ? "Ingesting to Medplum…"
-                  : `⚡ Ingest All ${fileData?.total_rows || 0} to Medplum`}
-              </button>
+              <div className="row" style={{ margin: 0, gap: "10px" }}>
+                <button
+                  className="secondary"
+                  onClick={() => runIngestion(true)}
+                  disabled={!approved || !!busy}
+                >
+                  {busy === "validating" ? "Validating…" : `🔍 Run Dry Run (${fileData?.total_rows || 0})`}
+                </button>
+
+                <button
+                  className="primary success"
+                  onClick={() => runIngestion(false)}
+                  disabled={!approved || !!busy}
+                >
+                  {busy === "delivering"
+                    ? "Ingesting to Medplum…"
+                    : `⚡ Ingest All ${fileData?.total_rows || 0} to Medplum`}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {error && <div className="error">{error}</div>}
 
@@ -563,3 +667,4 @@ export default function UploadPage() {
     </section>
   );
 }
+
