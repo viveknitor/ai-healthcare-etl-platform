@@ -114,12 +114,27 @@ def apply_mapping(cfg: MappingConfig, payload: dict, require_approved: bool = Tr
 
 
 def _sanitize_extensions(node: Any, default_prefix: str = "urn:source:extension") -> Any:
-    """Ensure all FHIR extensions have a non-empty 'url' and prune empty extensions."""
+    """Ensure all FHIR extensions have a non-empty 'url', correct JSON primitive types, and prune empty extensions."""
     if isinstance(node, dict):
         if "extension" in node and isinstance(node["extension"], list):
             cleaned = []
             for idx, ext in enumerate(node["extension"]):
                 if isinstance(ext, dict):
+                    # Coerce JSON primitive types on extension values
+                    for k, v in list(ext.items()):
+                        if k == "valueDecimal" and isinstance(v, str):
+                            try:
+                                ext[k] = float(v) if "." in v else int(v)
+                            except ValueError:
+                                pass
+                        elif k in ("valueInteger", "valuePositiveInt", "valueUnsignedInt") and isinstance(v, str):
+                            try:
+                                ext[k] = int(float(v))
+                            except ValueError:
+                                pass
+                        elif k == "valueBoolean" and isinstance(v, str):
+                            ext[k] = v.lower() in ("true", "1", "yes", "y", "t")
+
                     has_val = any(k.startswith("value") or k == "extension" for k in ext.keys())
                     if has_val:
                         if not ext.get("url"):
@@ -131,6 +146,13 @@ def _sanitize_extensions(node: Any, default_prefix: str = "urn:source:extension"
                 node.pop("extension", None)
         for k, v in list(node.items()):
             if k != "extension":
+                if k in ("multipleBirthBoolean", "active") and isinstance(v, str):
+                    node[k] = v.lower() in ("true", "1", "yes", "y", "t")
+                elif k in ("multipleBirthInteger",) and isinstance(v, str):
+                    try:
+                        node[k] = int(float(v))
+                    except ValueError:
+                        pass
                 node[k] = _sanitize_extensions(v, default_prefix)
     elif isinstance(node, list):
         return [_sanitize_extensions(x, default_prefix) for x in node if x is not None]

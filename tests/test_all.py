@@ -328,4 +328,37 @@ def test_dynamic_reconciliation_mapping_aware():
     assert statuses["unmapped_extra_col"] == "dropped"
 
 
+def test_extension_primitive_type_coercion():
+    """Verify that valueDecimal, valueInteger, and valueBoolean strings are coerced to JSON primitives."""
+    from app.mapping.engine import apply_mapping
+    from app.mapping.models import MappingConfig
+
+    mapping = MappingConfig(
+        name="test_coercion",
+        target_resource="Patient",
+        status="approved",
+        rules=[
+            {"source": "medincome", "target": "extension[0].valueDecimal"},
+            {"source": "count", "target": "extension[1].valueInteger"},
+            {"source": "isvip", "target": "extension[2].valueBoolean"},
+        ]
+    )
+
+    row = {
+        "medincome": "65000",
+        "count": "42",
+        "isvip": "true",
+    }
+
+    res, errors = apply_mapping(mapping, row)
+    assert errors == []
+    assert res["extension"][0]["valueDecimal"] == 65000
+    assert isinstance(res["extension"][0]["valueDecimal"], (int, float))
+    assert res["extension"][1]["valueInteger"] == 42
+    assert isinstance(res["extension"][1]["valueInteger"], int)
+    assert res["extension"][2]["valueBoolean"] is True
+    assert isinstance(res["extension"][2]["valueBoolean"], bool)
+
+
+
 
