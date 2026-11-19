@@ -290,3 +290,42 @@ def test_extension_mapping_auto_url_and_validation():
     assert val_errs == []
 
 
+def test_dynamic_reconciliation_mapping_aware():
+    """Verify that generate_dynamic_reconciliation properly links source columns to FHIR targets
+    when a MappingConfig is provided, preventing false 'Omitted' statuses."""
+    from app.mapping.engine import apply_mapping
+    from app.mapping.models import MappingConfig
+    from app.pipeline import generate_dynamic_reconciliation
+
+    mapping = MappingConfig(
+        name="test_recon_map",
+        target_resource="Patient",
+        status="approved",
+        rules=[
+            {"source": "fullname", "target": "name[0].text"},
+            {"source": "dob", "target": "birthDate"},
+            {"source": "sex", "target": "gender", "transform": "map", "args": {"M": "male", "F": "female"}},
+            {"source": "deathdate", "target": "deceasedDateTime"},
+        ]
+    )
+
+    row = {
+        "fullname": "Aarav Sharma",
+        "dob": "1988-04-12",
+        "sex": "M",
+        "deathdate": "",
+        "unmapped_extra_col": "123",
+    }
+
+    res, _ = apply_mapping(mapping, row)
+    table = generate_dynamic_reconciliation(row, res, mapping=mapping)
+
+    statuses = {item["field"]: item["status"] for item in table}
+    assert statuses["fullname"] == "preserved"
+    assert statuses["dob"] == "preserved"
+    assert statuses["sex"] == "transformed"
+    assert statuses["deathdate"] == "empty"
+    assert statuses["unmapped_extra_col"] == "dropped"
+
+
+

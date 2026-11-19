@@ -149,7 +149,7 @@ def ingest_uploaded_records(
             "mapping_name": mapping.name,
         }
 
-        recon_pre = generate_dynamic_reconciliation(row, resource, source_name=dataset_name, target_name="Medplum")
+        recon_pre = generate_dynamic_reconciliation(row, resource, source_name=dataset_name, target_name="Medplum", mapping=mapping)
 
         if dry_run or medplum is None:
             results.append(
@@ -169,7 +169,7 @@ def ingest_uploaded_records(
             out = medplum.upsert(resource, system, source_id)
             is_created = out.get("_is_created", False)
             details["delivery_action"] = "created" if is_created else "updated"
-            recon_post = generate_dynamic_reconciliation(row, out, source_name=dataset_name, target_name="Medplum")
+            recon_post = generate_dynamic_reconciliation(row, out, source_name=dataset_name, target_name="Medplum", mapping=mapping)
             results.append(
                 RecordResult(
                     source_id=source_id,

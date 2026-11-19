@@ -121,6 +121,22 @@ export default function ReconciliationTable({
               Generated ({statusCounts.generated})
             </button>
           )}
+          {statusCounts.dropped > 0 && (
+            <button
+              className={`filter-chip ${filter === "dropped" ? "active" : ""}`}
+              onClick={() => setFilter("dropped")}
+            >
+              Omitted ({statusCounts.dropped})
+            </button>
+          )}
+          {statusCounts.empty > 0 && (
+            <button
+              className={`filter-chip ${filter === "empty" ? "active" : ""}`}
+              onClick={() => setFilter("empty")}
+            >
+              Empty ({statusCounts.empty})
+            </button>
+          )}
         </div>
       </div>
 

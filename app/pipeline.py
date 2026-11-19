@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass, field
 from .connectors.hapi import HapiClient
 from .connectors.medplum import MedplumClient
 from .logging_setup import get_logger
+from .mapping.engine import MISSING, get_path
 from .validation import validate_fhir
 
 log = get_logger("pipeline")
@@ -216,13 +217,123 @@ def format_dynamic_value(val: any) -> str:
 
 
 def generate_dynamic_reconciliation(source_res: dict | None, target_res: dict | None,
-                                     source_name: str = "Source", target_name: str = "Medplum") -> list[dict]:
+                                     source_name: str = "Source", target_name: str = "Medplum",
+                                     mapping: Any = None) -> list[dict]:
     """Generates a schema-agnostic, field-by-field dynamic reconciliation and derivation matrix.
-    Works for ANY source payload, ANY destination schema, and ANY resource category without hardcoding."""
+    When a MappingConfig is provided, it maps each source column directly to its target FHIR path.
+    Otherwise, it compares source and target FHIR fields directly."""
     source_res = source_res or {}
     target_res = target_res or {}
-    rt = target_res.get("resourceType") or source_res.get("resourceType") or "Resource"
+    rt = target_res.get("resourceType") or (getattr(mapping, "target_resource", None) if mapping else None) or source_res.get("resourceType") or "Resource"
 
+    # --- Case 1: MappingConfig is provided (e.g. Database / CSV Upload to FHIR) ---
+    if mapping is not None and getattr(mapping, "rules", None):
+        matrix = []
+
+        # System-level Resource Type
+        matrix.append({
+            "field": "resourceType",
+            "label": "Resource Type / Domain",
+            "source_raw": None,
+            "source_display": "—",
+            "rule": f"Defaulted FHIR resource type for {target_name}",
+            "status": "generated",
+            "target_raw": rt,
+            "target_display": rt,
+        })
+
+        def _extract_target_val(target: dict, rule_target: str, rule_source: str) -> Any:
+            val = get_path(target, rule_target)
+            if val is not MISSING and val is not None:
+                return val
+            if "extension" in rule_target and "extension" in target:
+                target_url = f"urn:source:extension:{rule_source}"
+                for ext in target.get("extension", []):
+                    if isinstance(ext, dict) and ext.get("url") == target_url:
+                        for k, v in ext.items():
+                            if k.startswith("value"):
+                                return v
+            return None
+
+        mapped_sources = set()
+        for rule in mapping.rules:
+            mapped_sources.add(rule.source)
+            src_val = source_res.get(rule.source)
+            tgt_val = _extract_target_val(target_res, rule.target, rule.source)
+
+            src_disp = format_dynamic_value(src_val)
+            tgt_disp = format_dynamic_value(tgt_val)
+
+            if src_val in (None, ""):
+                status = "empty"
+                rule_desc = f"Source field empty in record ({rule.source} -> {rule.target})"
+            elif tgt_val is not None:
+                if str(src_val).strip() == str(tgt_disp).strip() or src_val == tgt_val:
+                    status = "preserved"
+                    rule_desc = f"Direct mapped: {rule.source} -> {rule.target}"
+                else:
+                    status = "transformed"
+                    rule_desc = f"Transformed: {rule.source} ({src_disp}) -> {rule.target} ({tgt_disp})"
+            else:
+                status = "dropped"
+                rule_desc = f"Unmapped in destination payload ({rule.source} -> {rule.target})"
+
+            matrix.append({
+                "field": rule.source,
+                "label": f"{get_field_display_label(rule.source, rt)} ({rule.source})",
+                "source_raw": src_val,
+                "source_display": src_disp,
+                "rule": rule_desc,
+                "status": status,
+                "target_raw": tgt_val,
+                "target_display": tgt_disp,
+            })
+
+        # Check for unmapped source columns
+        for col, val in source_res.items():
+            if col not in mapped_sources:
+                matrix.append({
+                    "field": col,
+                    "label": f"{get_field_display_label(col, rt)} ({col})",
+                    "source_raw": val,
+                    "source_display": format_dynamic_value(val),
+                    "rule": f"Unmapped source column (omitted from {target_name} FHIR payload)",
+                    "status": "dropped",
+                    "target_raw": None,
+                    "target_display": "—",
+                })
+
+        # Scoped idempotent identifier
+        for ident in target_res.get("identifier", []):
+            if isinstance(ident, dict) and str(ident.get("system", "")).startswith("urn:source:"):
+                matrix.append({
+                    "field": "identifier",
+                    "label": "Scoped Identity System",
+                    "source_raw": ident.get("value"),
+                    "source_display": format_dynamic_value(ident.get("value")),
+                    "rule": f"Injected idempotent scoped identifier ({ident.get('system')}|{ident.get('value')}) for conditional upsert",
+                    "status": "scoped_identity",
+                    "target_raw": ident,
+                    "target_display": f"{ident.get('system')}|{ident.get('value')}",
+                })
+                break
+
+        # Assigned ID if present
+        if target_res.get("id"):
+            matrix.append({
+                "field": "id",
+                "label": f"Native {target_name} ID",
+                "source_raw": None,
+                "source_display": "—",
+                "rule": f"Assigned native UUID by {target_name}",
+                "status": "generated",
+                "target_raw": target_res.get("id"),
+                "target_display": str(target_res.get("id")),
+            })
+
+        return matrix
+
+    # --- Case 2: FHIR-to-FHIR direct reconciliation (e.g. HAPI to Medplum) ---
     all_keys = list(dict.fromkeys(list(source_res.keys()) + list(target_res.keys())))
 
     priority_order = [
