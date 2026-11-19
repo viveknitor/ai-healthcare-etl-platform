@@ -243,3 +243,50 @@ def test_mapping_storage_save_and_list(tmp_path, monkeypatch):
     all_maps = list_mappings()
     assert any(m["name"] == "auto_test" for m in all_maps)
 
+
+def test_extension_mapping_auto_url_and_validation():
+    """Verify that mapping custom columns to extension[n].value* automatically
+    receives a valid 'url' property, empty extensions are pruned, and passes FHIR R4 validation."""
+    from app.mapping.engine import apply_mapping
+    from app.mapping.models import MappingConfig
+    from app.validation import validate_fhir
+
+    mapping = MappingConfig(
+        name="ext_test",
+        version=1,
+        target_resource="Patient",
+        status="approved",
+        rules=[
+            {"source": "memid", "target": "identifier[0].value", "required": True},
+            {"source": "fullname", "target": "name[0].text"},
+            {"source": "obs_ethnicid", "target": "extension[0].valueString"},
+            {"source": "medincome", "target": "extension[1].valueString"},
+            {"source": "missing_col", "target": "extension[2].valueString"},
+        ]
+    )
+
+    row = {
+        "memid": "100001",
+        "fullname": "Maria Rodriguez",
+        "obs_ethnicid": "HISPANIC",
+        "medincome": "75000",
+        "missing_col": "",  # Should be skipped and pruned cleanly
+    }
+
+    resource, errors = apply_mapping(mapping, row)
+    assert errors == []
+    assert len(resource["extension"]) == 2
+    assert resource["extension"][0] == {
+        "url": "urn:source:extension:obs_ethnicid",
+        "valueString": "HISPANIC",
+    }
+    assert resource["extension"][1] == {
+        "url": "urn:source:extension:medincome",
+        "valueString": "75000",
+    }
+
+    # FHIR validation must pass with zero errors
+    val_errs = validate_fhir(resource)
+    assert val_errs == []
+
+

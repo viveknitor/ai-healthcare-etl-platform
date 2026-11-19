@@ -98,10 +98,43 @@ def apply_mapping(cfg: MappingConfig, payload: dict, require_approved: bool = Tr
             errors.append(f"unknown transform '{rule.transform}' on '{rule.source}'")
             continue
         try:
-            set_path(out, rule.target, fn(value, rule.args))
+            val = fn(value, rule.args)
+            set_path(out, rule.target, val)
+            # Auto-inject valid FHIR R4 extension URL if mapping to an extension value
+            m = re.match(r"^(.*extension\[\d+\])\.value\w+$", rule.target)
+            if m:
+                url_path = f"{m.group(1)}.url"
+                if get_path(out, url_path) in (MISSING, None, ""):
+                    set_path(out, url_path, f"urn:source:extension:{rule.source}")
         except Exception as e:  # noqa: BLE001 - report, don't crash the batch
             errors.append(f"'{rule.source}' -> '{rule.target}' ({rule.transform}): {e}")
-    return _compact(out), errors
+    compacted = _compact(out)
+    sanitized = _sanitize_extensions(compacted)
+    return sanitized, errors
+
+
+def _sanitize_extensions(node: Any, default_prefix: str = "urn:source:extension") -> Any:
+    """Ensure all FHIR extensions have a non-empty 'url' and prune empty extensions."""
+    if isinstance(node, dict):
+        if "extension" in node and isinstance(node["extension"], list):
+            cleaned = []
+            for idx, ext in enumerate(node["extension"]):
+                if isinstance(ext, dict):
+                    has_val = any(k.startswith("value") or k == "extension" for k in ext.keys())
+                    if has_val:
+                        if not ext.get("url"):
+                            ext["url"] = f"{default_prefix}:field-{idx + 1}"
+                        cleaned.append(_sanitize_extensions(ext, default_prefix))
+            if cleaned:
+                node["extension"] = cleaned
+            else:
+                node.pop("extension", None)
+        for k, v in list(node.items()):
+            if k != "extension":
+                node[k] = _sanitize_extensions(v, default_prefix)
+    elif isinstance(node, list):
+        return [_sanitize_extensions(x, default_prefix) for x in node if x is not None]
+    return node
 
 
 def _compact(o: Any) -> Any:

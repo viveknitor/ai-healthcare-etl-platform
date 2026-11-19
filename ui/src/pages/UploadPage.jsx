@@ -369,9 +369,35 @@ export default function UploadPage() {
 
               {unmappedHeaders.length > 0 && (
                 <div style={{ marginTop: "8px", fontSize: "12px" }}>
-                  <span style={{ color: "var(--text-muted)" }}>
-                    Unmapped / Skipped Columns (Click to add as FHIR Extension):{" "}
-                  </span>
+                  <div className="row between" style={{ margin: "0 0 6px" }}>
+                    <span style={{ color: "var(--text-muted)" }}>
+                      Unmapped / Skipped Columns (Click to add as FHIR Extension):
+                    </span>
+                    <button
+                      className="secondary sm"
+                      style={{ fontSize: "11px", padding: "2px 8px" }}
+                      onClick={() => {
+                        let extIdx = mapping.rules.filter(
+                          (r) => r.target && r.target.startsWith("extension[")
+                        ).length;
+                        const newRules = unmappedHeaders.map((col) => ({
+                          source: col,
+                          target: `extension[${extIdx++}].valueString`,
+                          transform: "direct",
+                          confidence: 0.85,
+                          rationale: `Mapped ${col} as custom extension`,
+                        }));
+                        setMapping({
+                          ...mapping,
+                          status: "pending_review",
+                          rules: [...mapping.rules, ...newRules],
+                        });
+                      }}
+                      title="Automatically map all remaining unmapped columns as FHIR R4 Extensions"
+                    >
+                      ✨ Map All Remaining as Extensions
+                    </button>
+                  </div>
                   {unmappedHeaders.map((col) => (
                     <span
                       key={col}
@@ -383,9 +409,12 @@ export default function UploadPage() {
                         borderColor: "rgba(245, 158, 11, 0.3)",
                       }}
                       onClick={() => {
+                        const existingExtCount = mapping.rules.filter(
+                          (r) => r.target && r.target.startsWith("extension[")
+                        ).length;
                         const newRule = {
                           source: col,
-                          target: `extension[${mapping.rules.length}].valueString`,
+                          target: `extension[${existingExtCount}].valueString`,
                           transform: "direct",
                           confidence: 0.85,
                           rationale: `Mapped ${col} as custom extension`,
