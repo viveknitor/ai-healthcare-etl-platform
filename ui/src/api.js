@@ -18,4 +18,19 @@ export const api = {
   suggestMapping: (sample, target_resource) => call("/mappings/suggest", { sample, target_resource }),
   transform: (mapping, payload) => call("/transform", { mapping, payload }),
   getLiveMedplumResource: (resourceType, resourceId) => call(`/medplum/live/${resourceType}/${resourceId}`),
+  getMappings: () => call("/mappings"),
+  saveMapping: (mapping) => call("/mappings/save", mapping),
+  uploadFile: async (file) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${BASE}/upload/parse`, {
+      method: "POST",
+      body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Upload failed (${res.status})`);
+    return data;
+  },
+  executeUploadIngestion: (rows, mapping, dry_run, dataset_name = "upload") =>
+    call("/upload/execute", { rows, mapping, dry_run, dataset_name }),
 };

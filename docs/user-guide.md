@@ -160,6 +160,19 @@ For onboarding custom, non-FHIR JSON data from legacy hospital systems:
 
 ---
 
+### Scenario E: Direct File & Database Ingestion (Direct File Ingestion Tab)
+
+For ingesting proprietary CSV, TSV, or JSON exports directly into Medplum without HAPI:
+1. Navigate to the **`Direct File Ingestion`** tab (`📁`).
+2. **Upload a file** (e.g. PlanData SQL Server export or custom CSV), or click **`⚡ Load Sample PlanData Table`**.
+3. The platform displays a **Data Preview** of your uploaded rows.
+4. Gemini 3.5 Flash automatically synthesizes and displays the **AI Mapping Contract**.
+5. Click **`✓ Approve & Save Mapping`**.
+6. Click **`⚡ Ingest All to Medplum`** to transform and commit all records into Medplum!
+7. Click **`Inspect`** on any row to view the dynamic reconciliation matrix or raw payload.
+
+---
+
 ## 4. Operational Management & Commands
 
 ### Running Unit Tests:

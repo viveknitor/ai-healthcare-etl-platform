@@ -330,7 +330,7 @@ def extract_clinical_summary(resource: dict) -> dict:
             n = names[0]
             given = " ".join(n.get("given", [])) if isinstance(n.get("given"), list) else str(n.get("given", ""))
             family = str(n.get("family", ""))
-            display_name = f"{given} {family}".strip() or "Unknown"
+            display_name = f"{given} {family}".strip() or str(n.get("text") or "").strip() or "Unknown"
         telecoms = [t.get("value") for t in resource.get("telecom", []) if isinstance(t, dict) and t.get("value")]
         addr = ""
         if resource.get("address") and isinstance(resource["address"], list) and isinstance(resource["address"][0], dict):

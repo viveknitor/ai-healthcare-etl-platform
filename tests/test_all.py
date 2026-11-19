@@ -183,3 +183,63 @@ def test_dynamic_reconciliation_any_schema():
     assert vitals_row["status"] == "preserved"
     ident_row = next(m for m in matrix if m["field"] == "identifier")
     assert ident_row["status"] == "scoped_identity"
+
+
+def test_parse_uploaded_file_csv_and_tsv():
+    from app.upload_pipeline import parse_uploaded_file
+
+    csv_text = "memid,fullname,sex,status\n101,John Doe,M,ACTIVE\n102,Jane Smith,F,TERM\n"
+    rows = parse_uploaded_file(csv_text, "data.csv")
+    assert len(rows) == 2
+    assert rows[0]["memid"] == "101"
+    assert rows[0]["fullname"] == "John Doe"
+    assert rows[1]["sex"] == "F"
+
+    tsv_text = "memid\tfullname\tsex\n201\tBob Ray\tM\n"
+    t_rows = parse_uploaded_file(tsv_text, "export.tsv")
+    assert len(t_rows) == 1
+    assert t_rows[0]["memid"] == "201"
+
+
+def test_upload_pipeline_dry_run_ingestion():
+    from app.mapping.models import MappingConfig
+    from app.upload_pipeline import ingest_uploaded_records
+
+    mapping = MappingConfig(
+        name="plandata_test",
+        version=1,
+        target_resource="Patient",
+        status="approved",
+        rules=[
+            {"source": "memid", "target": "identifier[0].value", "required": True},
+            {"source": "fullname", "target": "name[0].text", "required": True},
+            {"source": "sex", "target": "gender", "transform": "map", "args": {"M": "male", "F": "female", "default": "unknown"}},
+        ]
+    )
+    rows = [
+        {"memid": "M101", "fullname": "Quincy Kowalski", "sex": "M"},
+        {"memid": "M102", "fullname": "Elena Rostova", "sex": "F"},
+    ]
+    report = ingest_uploaded_records(None, rows, mapping, dataset_name="plandata", dry_run=True)
+    assert report["summary"]["total"] == 2
+    assert report["summary"]["counts"]["dry_run"] == 2
+    assert report["results"][0]["patient_summary"]["title"] == "Quincy Kowalski"
+    assert report["results"][1]["patient_summary"]["gender"] == "female"
+
+
+def test_mapping_storage_save_and_list(tmp_path, monkeypatch):
+    from app.mapping.models import MappingConfig
+    from app.mapping.storage import list_mappings, load_mapping, save_mapping
+    import app.mapping.storage as storage_mod
+
+    monkeypatch.setattr(storage_mod, "MAPPINGS_DIR", tmp_path)
+
+    cfg = MappingConfig(name="auto_test", target_resource="Patient", status="approved", rules=[])
+    filename = save_mapping(cfg)
+    assert filename == "auto_test.json"
+    loaded = load_mapping("auto_test")
+    assert loaded is not None
+    assert loaded.name == "auto_test"
+    all_maps = list_mappings()
+    assert any(m["name"] == "auto_test" for m in all_maps)
+

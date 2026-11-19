@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -7,8 +7,10 @@ from .connectors.hapi import HapiClient
 from .connectors.medplum import MedplumClient
 from .mapping.engine import MappingNotApproved, apply_mapping
 from .mapping.models import MappingConfig
+from .mapping.storage import list_mappings, load_mapping, save_mapping
 from .mapping.suggest import SuggestError, suggest_mapping
 from .pipeline import generate_dynamic_reconciliation, run_hapi_to_medplum
+from .upload_pipeline import ingest_uploaded_records, parse_uploaded_file
 from .validation import validate_fhir
 
 app = FastAPI(title="Healthcare ETL")
@@ -31,6 +33,13 @@ class SuggestRequest(BaseModel):
 class TransformRequest(BaseModel):
     mapping: MappingConfig
     payload: dict
+
+
+class UploadExecuteRequest(BaseModel):
+    rows: list[dict]
+    mapping: MappingConfig
+    dry_run: bool = True
+    dataset_name: str = "upload"
 
 
 @app.get("/health")
@@ -97,3 +106,47 @@ def transform(req: TransformRequest):
         "validation_errors": validate_fhir(resource),
         "reconciliation_table": recon,
     }
+
+
+@app.get("/mappings")
+def get_all_mappings():
+    return {"mappings": list_mappings()}
+
+
+@app.post("/mappings/save")
+def save_mapping_endpoint(mapping: MappingConfig):
+    filename = save_mapping(mapping)
+    return {"ok": True, "filename": filename, "mapping": mapping}
+
+
+@app.post("/upload/parse")
+async def upload_and_parse_file(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        rows = parse_uploaded_file(contents, file.filename or "data.csv")
+        if not rows:
+            raise HTTPException(400, "Could not extract any rows from the uploaded file.")
+        return {
+            "filename": file.filename,
+            "total_rows": len(rows),
+            "sample_rows": rows[:5],
+            "all_rows": rows,
+            "headers": list(rows[0].keys()),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Error processing file: {e}")
+
+
+@app.post("/upload/execute")
+def execute_upload_ingestion(req: UploadExecuteRequest):
+    s = get_settings()
+    medplum = None if req.dry_run else MedplumClient(s.medplum_base_url, s.medplum_client_id, s.medplum_client_secret)
+    return ingest_uploaded_records(
+        medplum=medplum,
+        rows=req.rows,
+        mapping=req.mapping,
+        dataset_name=req.dataset_name,
+        dry_run=req.dry_run,
+    )
