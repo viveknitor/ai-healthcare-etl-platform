@@ -79,6 +79,18 @@ TRANSFORMS = {
 }
 
 
+_IDENTIFIER_SYSTEM_MAP = {
+    "ssn": ("http://hl7.org/fhir/sid/us-ssn", "SSN"),
+    "memid": ("http://hospital.smarthealth.org/member-id", "Member ID"),
+    "member_id": ("http://hospital.smarthealth.org/member-id", "Member ID"),
+    "entityid": ("http://hospital.smarthealth.org/entity-id", "Entity ID"),
+    "umin": ("http://hospital.smarthealth.org/umin", "UMIN"),
+    "secondaryid": ("http://hospital.smarthealth.org/secondary-id", "Secondary ID"),
+    "enterpriseid": ("http://hospital.smarthealth.org/enterprise-id", "Enterprise ID"),
+    "externalid": ("http://hospital.smarthealth.org/external-id", "External ID"),
+}
+
+
 def apply_mapping(cfg: MappingConfig, payload: dict, require_approved: bool = True) -> tuple[dict, list[str]]:
     """Returns (resource, errors). Errors are per-field so one bad value doesn't hide the rest."""
     if require_approved and cfg.status != "approved":
@@ -106,6 +118,19 @@ def apply_mapping(cfg: MappingConfig, payload: dict, require_approved: bool = Tr
                 url_path = f"{m.group(1)}.url"
                 if get_path(out, url_path) in (MISSING, None, ""):
                     set_path(out, url_path, f"urn:source:extension:{rule.source}")
+            # Auto-inject standard system URI and human-readable label for identifiers
+            m_id = re.match(r"^identifier\[(\d+)\]\.value$", rule.target)
+            if m_id:
+                idx = int(m_id.group(1))
+                sys_path = f"identifier[{idx}].system"
+                type_path = f"identifier[{idx}].type.text"
+                if get_path(out, sys_path) in (MISSING, None, ""):
+                    uri, label = _IDENTIFIER_SYSTEM_MAP.get(
+                        rule.source.lower(),
+                        (f"http://hospital.smarthealth.org/{rule.source.lower()}", rule.source.upper())
+                    )
+                    set_path(out, sys_path, uri)
+                    set_path(out, type_path, label)
         except Exception as e:  # noqa: BLE001 - report, don't crash the batch
             errors.append(f"'{rule.source}' -> '{rule.target}' ({rule.transform}): {e}")
     compacted = _compact(out)

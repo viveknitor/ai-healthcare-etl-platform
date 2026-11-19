@@ -34,7 +34,7 @@ Respond with ONLY a valid JSON object:
 }
 
 Comprehensive Mapping Guidelines for FHIR R4 Patient:
-1. Identifiers: Map all primary, alternate, external, and enterprise IDs to identifier[0].value, identifier[1].value, etc. (e.g. memid, ssn, ExternalId, entityid, secondaryid, enterpriseid, umin).
+1. Identifiers: Map all primary, alternate, external, and enterprise IDs to identifier[0].value, identifier[1].value, etc. (e.g. memid, ssn, ExternalId, entityid, secondaryid, enterpriseid, umin). Always populate constants for each identifier: "identifier[n].system" (e.g. "http://hl7.org/fhir/sid/us-ssn" for SSN, "http://hospital.smarthealth.org/{id_name}") and "identifier[n].type.text" (e.g. "Member ID", "SSN", "Entity ID").
 2. Demographics:
    - Full or split names -> name[0].text or name[0].given[0] / name[0].family.
    - Sex/Gender -> gender using transform "map" (e.g. {"M": "male", "F": "female", "default": "unknown"}).
