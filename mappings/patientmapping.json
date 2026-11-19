@@ -4,19 +4,19 @@
   "target_resource": "Patient",
   "status": "approved",
   "constants": {
-    "identifier[0].system": "http://hospital.smarthealth.org/member-id",
+    "identifier[0].system": "http://hospital.smarthealth.org/memid",
     "identifier[0].type.text": "Member ID",
-    "identifier[1].system": "http://hospital.smarthealth.org/entity-id",
+    "identifier[1].system": "http://hospital.smarthealth.org/entityid",
     "identifier[1].type.text": "Entity ID",
     "identifier[2].system": "http://hl7.org/fhir/sid/us-ssn",
     "identifier[2].type.text": "SSN",
     "identifier[3].system": "http://hospital.smarthealth.org/umin",
     "identifier[3].type.text": "UMIN",
-    "identifier[4].system": "http://hospital.smarthealth.org/secondary-id",
+    "identifier[4].system": "http://hospital.smarthealth.org/secondaryid",
     "identifier[4].type.text": "Secondary ID",
-    "identifier[5].system": "http://hospital.smarthealth.org/enterprise-id",
+    "identifier[5].system": "http://hospital.smarthealth.org/enterpriseid",
     "identifier[5].type.text": "Enterprise ID",
-    "identifier[6].system": "http://hospital.smarthealth.org/external-id",
+    "identifier[6].system": "http://hospital.smarthealth.org/externalid",
     "identifier[6].type.text": "External ID"
   },
   "rules": [
@@ -27,7 +27,7 @@
       "args": {},
       "required": true,
       "confidence": 1.0,
-      "rationale": "Primary member ID mapped to first identifier"
+      "rationale": "Primary member identifier mapping"
     },
     {
       "source": "entityid",
@@ -36,65 +36,19 @@
       "args": {},
       "required": false,
       "confidence": 0.9,
-      "rationale": "Entity ID mapped to second identifier"
-    },
-    {
-      "source": "ssn",
-      "target": "identifier[2].value",
-      "transform": "direct",
-      "args": {},
-      "required": false,
-      "confidence": 0.95,
-      "rationale": "SSN mapped to third identifier"
-    },
-    {
-      "source": "umin",
-      "target": "identifier[3].value",
-      "transform": "direct",
-      "args": {},
-      "required": false,
-      "confidence": 0.85,
-      "rationale": "UMIN mapped to fourth identifier"
-    },
-    {
-      "source": "secondaryid",
-      "target": "identifier[4].value",
-      "transform": "direct",
-      "args": {},
-      "required": false,
-      "confidence": 0.85,
-      "rationale": "Secondary ID mapped to fifth identifier"
-    },
-    {
-      "source": "enterpriseid",
-      "target": "identifier[5].value",
-      "transform": "direct",
-      "args": {},
-      "required": false,
-      "confidence": 0.9,
-      "rationale": "Enterprise ID mapped to sixth identifier"
-    },
-    {
-      "source": "ExternalId",
-      "target": "identifier[6].value",
-      "transform": "direct",
-      "args": {},
-      "required": false,
-      "confidence": 0.9,
-      "rationale": "External ID mapped to seventh identifier"
+      "rationale": "Entity identifier mapping"
     },
     {
       "source": "status",
       "target": "active",
       "transform": "map",
       "args": {
-        "A": true,
-        "ACTIVE": true,
+        "Active": true,
         "default": true
       },
-      "required": true,
+      "required": false,
       "confidence": 0.9,
-      "rationale": "Status mapped to active boolean flag"
+      "rationale": "Patient active status mapping"
     },
     {
       "source": "sex",
@@ -105,36 +59,38 @@
         "F": "female",
         "default": "unknown"
       },
-      "required": true,
-      "confidence": 0.95,
-      "rationale": "Administrative sex mapped to FHIR gender"
+      "required": false,
+      "confidence": 1.0,
+      "rationale": "Administrative gender mapping"
     },
     {
       "source": "fullname",
       "target": "name[0].text",
       "transform": "direct",
       "args": {},
-      "required": true,
-      "confidence": 0.95,
-      "rationale": "Full name mapped to name text"
+      "required": false,
+      "confidence": 1.0,
+      "rationale": "Full name mapping to text"
+    },
+    {
+      "source": "ssn",
+      "target": "identifier[2].value",
+      "transform": "direct",
+      "args": {},
+      "required": false,
+      "confidence": 1.0,
+      "rationale": "Social Security Number identifier mapping"
     },
     {
       "source": "dob",
       "target": "birthDate",
       "transform": "date",
-      "args": {},
-      "required": true,
-      "confidence": 1.0,
-      "rationale": "Date of birth mapped directly"
-    },
-    {
-      "source": "deathdate",
-      "target": "deceasedDateTime",
-      "transform": "date",
-      "args": {},
+      "args": {
+        "format": "YYYY-MM-DD"
+      },
       "required": false,
-      "confidence": 0.9,
-      "rationale": "Death date mapped to deceasedDateTime if present"
+      "confidence": 1.0,
+      "rationale": "Date of birth mapping"
     },
     {
       "source": "marital",
@@ -142,8 +98,8 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 0.85,
-      "rationale": "Marital status code mapped"
+      "confidence": 0.9,
+      "rationale": "Marital status code mapping"
     },
     {
       "source": "multiplebirth",
@@ -155,8 +111,44 @@
         "default": false
       },
       "required": false,
-      "confidence": 0.85,
-      "rationale": "Multiple birth indicator mapped to boolean"
+      "confidence": 0.9,
+      "rationale": "Multiple birth indicator mapping"
+    },
+    {
+      "source": "umin",
+      "target": "identifier[3].value",
+      "transform": "direct",
+      "args": {},
+      "required": false,
+      "confidence": 0.9,
+      "rationale": "UMIN identifier mapping"
+    },
+    {
+      "source": "secondaryid",
+      "target": "identifier[4].value",
+      "transform": "direct",
+      "args": {},
+      "required": false,
+      "confidence": 0.9,
+      "rationale": "Secondary identifier mapping"
+    },
+    {
+      "source": "enterpriseid",
+      "target": "identifier[5].value",
+      "transform": "direct",
+      "args": {},
+      "required": false,
+      "confidence": 0.9,
+      "rationale": "Enterprise identifier mapping"
+    },
+    {
+      "source": "ExternalId",
+      "target": "identifier[6].value",
+      "transform": "direct",
+      "args": {},
+      "required": false,
+      "confidence": 0.9,
+      "rationale": "External identifier mapping"
     },
     {
       "source": "primarylanguage",
@@ -164,83 +156,12 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 0.8,
-      "rationale": "Primary language code mapped to communication"
-    },
-    {
-      "source": "headofhouse",
-      "target": "contact[0].name.text",
-      "transform": "direct",
-      "args": {},
-      "required": false,
-      "confidence": 0.6,
-      "rationale": "Head of house reference/ID mapped to contact"
-    },
-    {
-      "source": "guardian",
-      "target": "contact[1].name.text",
-      "transform": "direct",
-      "args": {},
-      "required": false,
-      "confidence": 0.6,
-      "rationale": "Guardian reference/ID mapped to contact"
-    },
-    {
-      "source": "medincome",
-      "target": "extension[0].valueDecimal",
-      "transform": "direct",
-      "args": {},
-      "required": false,
-      "confidence": 0.7,
-      "rationale": "Median income mapped to extension"
-    },
-    {
-      "source": "obs_ethnicid",
-      "target": "extension[1].valueString",
-      "transform": "direct",
-      "args": {},
-      "required": false,
-      "confidence": 0.7,
-      "rationale": "Ethnicity ID mapped to extension"
-    },
-    {
-      "source": "isvip",
-      "target": "extension[2].valueBoolean",
-      "transform": "map",
-      "args": {
-        "Y": true,
-        "N": false,
-        "default": false
-      },
-      "required": false,
-      "confidence": 0.8,
-      "rationale": "VIP status mapped to extension boolean"
-    },
-    {
-      "source": "issubscriber",
-      "target": "extension[3].valueBoolean",
-      "transform": "map",
-      "args": {
-        "Y": true,
-        "N": false,
-        "default": false
-      },
-      "required": false,
-      "confidence": 0.8,
-      "rationale": "Subscriber status mapped to extension boolean"
-    },
-    {
-      "source": "GenderIdentityId",
-      "target": "extension[4].valueString",
-      "transform": "direct",
-      "args": {},
-      "required": false,
-      "confidence": 0.8,
-      "rationale": "Gender identity ID mapped to extension"
+      "confidence": 0.9,
+      "rationale": "Primary language communication mapping"
     },
     {
       "source": "lastupdate",
-      "target": "extension[5].valueString",
+      "target": "extension[0].valueString",
       "transform": "direct",
       "args": {},
       "required": false,
@@ -249,12 +170,57 @@
     },
     {
       "source": "updateid",
-      "target": "extension[6].valueString",
+      "target": "extension[1].valueString",
       "transform": "direct",
       "args": {},
       "required": false,
       "confidence": 0.85,
       "rationale": "Mapped updateid as custom extension"
+    },
+    {
+      "source": "headofhouse",
+      "target": "extension[2].valueString",
+      "transform": "direct",
+      "args": {},
+      "required": false,
+      "confidence": 0.85,
+      "rationale": "Mapped headofhouse as custom extension"
+    },
+    {
+      "source": "guardian",
+      "target": "extension[3].valueString",
+      "transform": "direct",
+      "args": {},
+      "required": false,
+      "confidence": 0.85,
+      "rationale": "Mapped guardian as custom extension"
+    },
+    {
+      "source": "medincome",
+      "target": "extension[4].valueString",
+      "transform": "direct",
+      "args": {},
+      "required": false,
+      "confidence": 0.85,
+      "rationale": "Mapped medincome as custom extension"
+    },
+    {
+      "source": "obs_ethnicid",
+      "target": "extension[5].valueString",
+      "transform": "direct",
+      "args": {},
+      "required": false,
+      "confidence": 0.85,
+      "rationale": "Mapped obs_ethnicid as custom extension"
+    },
+    {
+      "source": "deathdate",
+      "target": "extension[6].valueString",
+      "transform": "direct",
+      "args": {},
+      "required": false,
+      "confidence": 0.85,
+      "rationale": "Mapped deathdate as custom extension"
     },
     {
       "source": "createid",
@@ -275,8 +241,26 @@
       "rationale": "Mapped createdate as custom extension"
     },
     {
-      "source": "externalediting",
+      "source": "isvip",
       "target": "extension[9].valueString",
+      "transform": "direct",
+      "args": {},
+      "required": false,
+      "confidence": 0.85,
+      "rationale": "Mapped isvip as custom extension"
+    },
+    {
+      "source": "issubscriber",
+      "target": "extension[10].valueString",
+      "transform": "direct",
+      "args": {},
+      "required": false,
+      "confidence": 0.85,
+      "rationale": "Mapped issubscriber as custom extension"
+    },
+    {
+      "source": "externalediting",
+      "target": "extension[11].valueString",
       "transform": "direct",
       "args": {},
       "required": false,
@@ -285,12 +269,21 @@
     },
     {
       "source": "EligibilityOfficeId",
-      "target": "extension[10].valueString",
+      "target": "extension[12].valueString",
       "transform": "direct",
       "args": {},
       "required": false,
       "confidence": 0.85,
       "rationale": "Mapped EligibilityOfficeId as custom extension"
+    },
+    {
+      "source": "GenderIdentityId",
+      "target": "extension[13].valueString",
+      "transform": "direct",
+      "args": {},
+      "required": false,
+      "confidence": 0.85,
+      "rationale": "Mapped GenderIdentityId as custom extension"
     }
   ]
 }
