@@ -344,7 +344,7 @@ export default function PipelinePage() {
             </button>
 
             <button
-              className={`primary success ${!isValidated ? "disabled-gate" : ""}`}
+              className={`primary success ${deliveredCount > 0 ? "delivered-btn" : !isValidated ? "disabled-gate" : ""}`}
               onClick={() => {
                 if (!isValidated) {
                   alert("Mandatory Quality Gate: You must run 'Validate & Verify Schema' before delivering records to Medplum.");
@@ -355,7 +355,9 @@ export default function PipelinePage() {
               }}
               disabled={loading || !isValidated}
               title={
-                isValidated
+                deliveredCount > 0
+                  ? `All ${deliveredCount} records successfully delivered to Medplum. Click to re-run delivery if needed.`
+                  : isValidated
                   ? "Deliver and persist verified batch into Medplum database"
                   : "Validation Required: Please run 'Validate & Verify Schema' first to unlock delivery."
               }
@@ -363,9 +365,16 @@ export default function PipelinePage() {
                 minWidth: "210px",
                 opacity: !isValidated ? 0.45 : 1,
                 cursor: !isValidated ? "not-allowed" : "pointer",
+                background: deliveredCount > 0 ? "linear-gradient(135deg, #059669 0%, #10b981 100%)" : undefined,
+                boxShadow: deliveredCount > 0 ? "0 0 16px rgba(16, 185, 129, 0.45)" : undefined,
+                borderColor: deliveredCount > 0 ? "rgba(52, 211, 153, 0.6)" : undefined,
               }}
             >
-              {loading && !dryRun ? "Delivering…" : `⚡ Deliver to Medplum (${count})`}
+              {loading && !dryRun
+                ? "Delivering…"
+                : deliveredCount > 0
+                ? `✓ Delivered All ${deliveredCount} to Medplum`
+                : `⚡ Deliver to Medplum (${count})`}
             </button>
 
             <button

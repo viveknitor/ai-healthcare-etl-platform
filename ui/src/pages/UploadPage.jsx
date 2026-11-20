@@ -285,6 +285,7 @@ export default function UploadPage() {
           if (dryRun) {
             if (!hasErr && (completeEvent.summary?.total || 0) > 0) {
               setIsValidated(true);
+              setIsDelivered(false);
             } else {
               setIsValidated(false);
             }
@@ -547,6 +548,8 @@ export default function UploadPage() {
         const mappedSources = new Set(mapping?.rules?.map((r) => r.source) || []);
         const allHeaders = fileData?.headers || [];
         const unmappedHeaders = allHeaders.filter((h) => !mappedSources.has(h));
+        const deliveredCount = report?.summary?.counts?.delivered || 0;
+        const hasDelivered = (isDelivered || deliveredCount > 0) && (report?.summary?.counts?.dry_run || 0) === 0;
 
         return (
           <>
@@ -640,14 +643,31 @@ export default function UploadPage() {
                   </button>
 
                   <button
-                    className={`primary success ${!isValidated ? "disabled-btn" : ""}`}
+                    className={`primary success ${hasDelivered ? "delivered-btn" : !isValidated ? "disabled-btn" : ""}`}
                     onClick={() => runIngestion(false)}
                     disabled={!approved || !!busy}
-                    style={{ minWidth: "210px" }}
-                    title={isValidated ? "Deliver to Medplum" : "Pre-flight validation required before delivery"}
+                    style={{
+                      minWidth: "210px",
+                      background: hasDelivered
+                        ? "linear-gradient(135deg, #059669 0%, #10b981 100%)"
+                        : undefined,
+                      boxShadow: hasDelivered
+                        ? "0 0 16px rgba(16, 185, 129, 0.45)"
+                        : undefined,
+                      borderColor: hasDelivered ? "rgba(52, 211, 153, 0.6)" : undefined,
+                    }}
+                    title={
+                      hasDelivered
+                        ? `All ${deliveredCount || fileData?.total_rows || 0} records have been successfully delivered to Medplum. Click to re-run ingestion if needed.`
+                        : isValidated
+                        ? "Deliver to Medplum"
+                        : "Pre-flight validation required before delivery"
+                    }
                   >
                     {busy === "delivering"
                       ? "Ingesting to Medplum…"
+                      : hasDelivered
+                      ? `✓ Delivered All ${deliveredCount || fileData?.total_rows || 0} to Medplum`
                       : !isValidated
                       ? `⚡ Step 2: Ingest (${fileData?.total_rows || 0})`
                       : `⚡ Deliver All ${fileData?.total_rows || 0} to Medplum`}
