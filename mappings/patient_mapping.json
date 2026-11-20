@@ -22,12 +22,12 @@
   "metadata": {
     "llm_metrics": {
       "model": "gemini-flash-lite-latest",
-      "prompt_tokens": 1187,
-      "completion_tokens": 1764,
-      "total_tokens": 2951,
-      "cost_usd": 0.000309,
-      "cost_formatted": "$0.00031",
-      "latency_ms": 4792.12
+      "prompt_tokens": 1188,
+      "completion_tokens": 1664,
+      "total_tokens": 2852,
+      "cost_usd": 0.000294,
+      "cost_formatted": "$0.00029",
+      "latency_ms": 4590.16
     }
   },
   "rules": [
@@ -38,7 +38,7 @@
       "args": {},
       "required": true,
       "confidence": 1.0,
-      "rationale": "Primary Member ID mapped to identifier[0]"
+      "rationale": "Maps member ID to primary patient identifier"
     },
     {
       "source": "ssn",
@@ -47,7 +47,7 @@
       "args": {},
       "required": false,
       "confidence": 1.0,
-      "rationale": "SSN mapped to identifier[1]"
+      "rationale": "Maps Social Security Number"
     },
     {
       "source": "entityid",
@@ -55,8 +55,8 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 1.0,
-      "rationale": "Entity ID mapped to identifier[2]"
+      "confidence": 0.9,
+      "rationale": "Maps entity identifier"
     },
     {
       "source": "umin",
@@ -64,8 +64,8 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 1.0,
-      "rationale": "UMIN mapped to identifier[3]"
+      "confidence": 0.9,
+      "rationale": "Maps UMIN identifier"
     },
     {
       "source": "secondaryid",
@@ -73,8 +73,8 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 1.0,
-      "rationale": "Secondary ID mapped to identifier[4]"
+      "confidence": 0.9,
+      "rationale": "Maps secondary identifier"
     },
     {
       "source": "enterpriseid",
@@ -82,8 +82,8 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 1.0,
-      "rationale": "Enterprise ID mapped to identifier[5]"
+      "confidence": 0.9,
+      "rationale": "Maps enterprise identifier"
     },
     {
       "source": "ExternalId",
@@ -91,17 +91,21 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 1.0,
-      "rationale": "External ID mapped to identifier[6]"
+      "confidence": 0.9,
+      "rationale": "Maps external system identifier"
     },
     {
-      "source": "fullname",
-      "target": "name[0].text",
-      "transform": "direct",
-      "args": {},
-      "required": true,
+      "source": "status",
+      "target": "active",
+      "transform": "map",
+      "args": {
+        "Active": true,
+        "Inactive": false,
+        "default": true
+      },
+      "required": false,
       "confidence": 0.9,
-      "rationale": "Full name mapped to name[0].text"
+      "rationale": "Maps patient status to active boolean"
     },
     {
       "source": "sex",
@@ -112,35 +116,27 @@
         "F": "female",
         "default": "unknown"
       },
+      "required": false,
+      "confidence": 1.0,
+      "rationale": "Maps administrative sex code"
+    },
+    {
+      "source": "fullname",
+      "target": "name[0].text",
+      "transform": "direct",
+      "args": {},
       "required": true,
       "confidence": 1.0,
-      "rationale": "Sex mapped to FHIR gender codes"
+      "rationale": "Maps full patient name"
     },
     {
       "source": "dob",
       "target": "birthDate",
       "transform": "date",
-      "args": {
-        "sourceFormat": "DD/MM/YYYY HH:mm:ss.SSS",
-        "targetFormat": "YYYY-MM-DD"
-      },
+      "args": {},
       "required": true,
-      "confidence": 0.95,
-      "rationale": "Date of birth formatted to YYYY-MM-DD"
-    },
-    {
-      "source": "status",
-      "target": "active",
-      "transform": "map",
-      "args": {
-        "Active": true,
-        "ACTIVE": true,
-        "A": true,
-        "default": false
-      },
-      "required": true,
-      "confidence": 0.9,
-      "rationale": "Status mapped to active boolean"
+      "confidence": 1.0,
+      "rationale": "Maps date of birth"
     },
     {
       "source": "marital",
@@ -148,8 +144,8 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 0.8,
-      "rationale": "Marital status code mapped to maritalStatus coding"
+      "confidence": 0.9,
+      "rationale": "Maps marital status code"
     },
     {
       "source": "multiplebirth",
@@ -162,7 +158,7 @@
       },
       "required": false,
       "confidence": 0.9,
-      "rationale": "Multiple birth indicator mapped to multipleBirthBoolean"
+      "rationale": "Maps multiple birth flag to multipleBirthBoolean"
     },
     {
       "source": "primarylanguage",
@@ -170,8 +166,8 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 0.8,
-      "rationale": "Primary language mapped to communication language code"
+      "confidence": 0.9,
+      "rationale": "Maps primary language communication code"
     },
     {
       "source": "medincome",
@@ -179,8 +175,8 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 0.85,
-      "rationale": "Median income mapped to extension valueDecimal"
+      "confidence": 0.8,
+      "rationale": "Maps median income SDoH extension"
     },
     {
       "source": "obs_ethnicid",
@@ -188,8 +184,8 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 0.85,
-      "rationale": "Ethnicity ID mapped to extension valueString"
+      "confidence": 0.8,
+      "rationale": "Maps ethnicity extension"
     },
     {
       "source": "isvip",
@@ -201,8 +197,8 @@
         "default": false
       },
       "required": false,
-      "confidence": 0.9,
-      "rationale": "VIP status mapped to extension valueBoolean"
+      "confidence": 0.8,
+      "rationale": "Maps VIP status extension"
     },
     {
       "source": "GenderIdentityId",
@@ -210,8 +206,8 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 0.9,
-      "rationale": "Gender identity ID mapped to extension valueString"
+      "confidence": 0.8,
+      "rationale": "Maps gender identity extension"
     },
     {
       "source": "lastupdate",
