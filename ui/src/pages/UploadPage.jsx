@@ -250,19 +250,26 @@ export default function UploadPage() {
 
   const downloadCSVReport = () => {
     if (!report?.results || report.results.length === 0) return;
-    const rows = report.results.map((r, i) => ({
-      "#": i + 1,
-      "Source Identifier": r.source_id,
-      "Name / Title": r.patient_summary?.title || "—",
-      "Gender": r.patient_summary?.gender || "—",
-      "Birth Date": r.patient_summary?.secondary_value || "—",
-      "Status": r.status === "dry_run" ? "validated" : r.status,
-      "Target Medplum ID": r.target_id || "—",
-      "Medplum URL": r.target_id ? `http://localhost:3000/Patient/${r.target_id}` : "—",
-      "Scoped Identifier": r.mapping_details?.idempotent_identifier || "—",
-      "Errors": (r.errors || []).join(" | "),
-    }));
-    const headers = Object.keys(rows[0]);
+
+    // Merge all original source input columns (all 27+ fields) with ETL execution & Medplum linkage columns
+    const rows = report.results.map((r, i) => {
+      const srcRecord = r.source_record || fileData?.all_rows?.[i] || {};
+      return {
+        "#": i + 1,
+        "ETL Status": r.status === "dry_run" ? "validated" : r.status,
+        "Target Medplum ID": r.target_id || "—",
+        "Medplum URL": r.target_id ? `http://localhost:3000/Patient/${r.target_id}` : "—",
+        "Scoped Identifier": r.mapping_details?.idempotent_identifier || "—",
+        ...srcRecord,
+        "ETL Errors": (r.errors || []).join(" | "),
+      };
+    });
+
+    // Collect all distinct headers preserving all 27+ original input columns
+    const headerSet = new Set();
+    rows.forEach((row) => Object.keys(row).forEach((k) => headerSet.add(k)));
+    const headers = Array.from(headerSet);
+
     // Prepend UTF-8 BOM (\uFEFF) so Microsoft Excel opens it directly without character corruption
     const csvContent =
       "\uFEFF" +
@@ -270,14 +277,14 @@ export default function UploadPage() {
         headers.join(","),
         ...rows.map((row) =>
           headers
-            .map((h) => `"${String(row[h] || "").replace(/"/g, '""')}"`)
+            .map((h) => `"${String(row[h] !== undefined && row[h] !== null ? row[h] : "").replace(/"/g, '""')}"`)
             .join(",")
         ),
       ].join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `${datasetName}_Medplum_Ingestion_Report.csv`;
+    link.download = `${datasetName}_Medplum_Full_Audit_Report.csv`;
     link.click();
   };
 
