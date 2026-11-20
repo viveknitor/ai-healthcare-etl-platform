@@ -175,7 +175,11 @@ export default function UploadPage() {
 
   const approveMapping = async () => {
     if (!mapping) return;
-    const updated = { ...mapping, status: "approved" };
+    const updated = {
+      ...mapping,
+      name: `${targetResource.toLowerCase()}_mapping`,
+      status: "approved",
+    };
     setMapping(updated);
     try {
       await api.saveMapping(updated);

@@ -141,6 +141,7 @@ def suggest_mapping(sample: dict, target_resource: str, *, api_key: str, model: 
     text = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.M).strip()
     try:
         cfg = MappingConfig.model_validate(json.loads(text))
+        cfg.name = f"{target_resource.lower()}_mapping"
     except Exception as e:  # noqa: BLE001
         raise SuggestError(f"LLM returned an invalid mapping: {e}") from e
 

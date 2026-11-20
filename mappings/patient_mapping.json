@@ -1,5 +1,5 @@
 {
-  "name": "PatientMapping",
+  "name": "patient_mapping",
   "version": 1,
   "target_resource": "Patient",
   "status": "approved",

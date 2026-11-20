@@ -12,7 +12,22 @@ from app.mapping.suggest import SuggestError, suggest_mapping
 from app.pipeline import run_hapi_to_medplum
 from app.validation import validate_fhir
 
-MAPPING = MappingConfig.model_validate(json.loads(Path("mappings/member_to_patient.json").read_text()))
+MAPPING_FIXTURE = {
+    "name": "member_to_patient",
+    "version": 1,
+    "target_resource": "Patient",
+    "status": "approved",
+    "constants": {"identifier[0].system": "urn:source:member-system"},
+    "rules": [
+        {"source": "member_id", "target": "identifier[0].value", "required": True},
+        {"source": "fname", "target": "name[0].given[0]"},
+        {"source": "lname", "target": "name[0].family", "required": True},
+        {"source": "dob", "target": "birthDate", "transform": "date", "args": {"from": "%Y-%m-%d"}},
+        {"source": "sex", "target": "gender", "transform": "map",
+         "args": {"m": "male", "f": "female", "u": "unknown", "default": "unknown"}},
+    ],
+}
+MAPPING = MappingConfig.model_validate(MAPPING_FIXTURE)
 SAMPLE = {"member_id": "M1001", "fname": "John", "lname": "Smith", "dob": "1990-01-15", "sex": "M"}
 
 
