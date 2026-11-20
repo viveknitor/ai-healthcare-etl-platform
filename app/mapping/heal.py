@@ -28,7 +28,7 @@ Core FHIR R4 Rules:
 3. Transforms:
    - For dates: use "date" transform
    - For codes/enums: use "map" transform with appropriate dictionary
-   - For strings: use "trim" or "identity"
+   - For strings: use "direct", "strip", or "trim"
 4. Do NOT invent source fields that do not exist in the source sample record.
 
 Return ONLY a valid JSON object matching the MappingConfig schema:
@@ -176,6 +176,12 @@ def heal_mapping_config(
             else:
                 new_parts.append(p)
         rule.target = ".".join(new_parts)
+        if rule.transform:
+            clean_t = rule.transform.strip().lower()
+            if clean_t in ("identity", "direct", "asis", "as_is", "none"):
+                rule.transform = "direct"
+            elif clean_t in ("trim", "strip"):
+                rule.transform = "strip"
 
     # Compute rule diffs between old mapping and healed mapping
     old_rules_by_src = {r.source: r for r in mapping.rules}

@@ -141,11 +141,25 @@ def _map(v: Any, args: dict) -> Any:
 
 TRANSFORMS = {
     "direct": lambda v, a: v,
+    "identity": lambda v, a: v,
+    "asis": lambda v, a: v,
+    "as_is": lambda v, a: v,
+    "none": lambda v, a: v,
     "date": _date,
     "map": _map,
     "upper": lambda v, a: str(v).upper(),
     "lower": lambda v, a: str(v).lower(),
     "strip": lambda v, a: str(v).strip(),
+    "trim": lambda v, a: str(v).strip(),
+    "string": lambda v, a: str(v),
+    "str": lambda v, a: str(v),
+    "int": lambda v, a: int(v) if str(v).strip().isdigit() else v,
+    "integer": lambda v, a: int(v) if str(v).strip().isdigit() else v,
+    "float": lambda v, a: float(v),
+    "decimal": lambda v, a: float(v),
+    "number": lambda v, a: float(v),
+    "bool": lambda v, a: str(v).lower() in ("true", "1", "t", "y", "yes") if isinstance(v, str) else bool(v),
+    "boolean": lambda v, a: str(v).lower() in ("true", "1", "t", "y", "yes") if isinstance(v, str) else bool(v),
 }
 
 
@@ -175,7 +189,8 @@ def apply_mapping(cfg: MappingConfig, payload: dict, require_approved: bool = Tr
             if rule.required:
                 errors.append(f"missing required source field '{rule.source}'")
             continue
-        fn = TRANSFORMS.get(rule.transform)
+        t_key = (rule.transform or "direct").strip().lower()
+        fn = TRANSFORMS.get(t_key)
         if fn is None:
             errors.append(f"unknown transform '{rule.transform}' on '{rule.source}'")
             continue
