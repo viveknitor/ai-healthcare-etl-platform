@@ -65,7 +65,7 @@ def suggest_mapping(sample: dict, target_resource: str, *, api_key: str, model: 
 
     # Resilient model fallback chain to prevent 503 high-demand or 429 rate-limit interruptions
     models_to_try = [model]
-    for m in ("gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-flash-latest"):
+    for m in ("gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-flash-latest"):
         if m not in models_to_try:
             models_to_try.append(m)
 

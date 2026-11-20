@@ -67,7 +67,7 @@ def heal_mapping_config(
         raise SuggestError("GEMINI_API_KEY (or GOOGLE_API_KEY) not set for AI Self-Healing")
 
     models_to_try = [model]
-    for m in ("gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-flash-latest"):
+    for m in ("gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-flash-latest"):
         if m not in models_to_try:
             models_to_try.append(m)
 
