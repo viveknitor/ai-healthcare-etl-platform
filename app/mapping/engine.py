@@ -356,18 +356,19 @@ def resolve_and_apply_transform(
 
 
 def _coerce_for_target(target: str, val: Any) -> Any:
-    """Enforces FHIR R4 schema data types based on target path conventions."""
+    """Universally enforces FHIR R4 schema data types across ALL columns and target paths."""
     if val is None or val is MISSING:
         return val
 
     tgt = target.lower()
+    tgt_tail = tgt.split(".")[-1]
 
-    # Booleans
-    if tgt.endswith("boolean") or tgt.split(".")[-1] == "active":
+    # 1. Booleans (active, multipleBirthBoolean, deceasedBoolean, valueBoolean, etc.)
+    if tgt.endswith("boolean") or tgt_tail == "active":
         return _parse_bool_dynamic(val)
 
-    # Integers
-    if tgt.endswith("integer") or tgt.endswith("positiveint"):
+    # 2. Integers (multipleBirthInteger, valueInteger, valuePositiveInt, valueUnsignedInt, etc.)
+    if tgt.endswith("integer") or tgt.endswith("positiveint") or tgt.endswith("unsignedint"):
         if not isinstance(val, int):
             try:
                 return _parse_number_dynamic(val, is_int=True)
@@ -375,8 +376,8 @@ def _coerce_for_target(target: str, val: Any) -> Any:
                 return val
         return val
 
-    # Decimals
-    if tgt.endswith("decimal"):
+    # 3. Decimals & Quantities (valueDecimal, quantity.value, valueQuantity.value, etc.)
+    if tgt.endswith("decimal") or tgt.endswith("quantity.value"):
         if not isinstance(val, (int, float)):
             try:
                 return _parse_number_dynamic(val, is_int=False)
@@ -384,14 +385,48 @@ def _coerce_for_target(target: str, val: Any) -> Any:
                 return val
         return val
 
-    # Gender
-    if tgt.split(".")[-1] == "gender":
+    # 4. Gender (administrative gender codes: male, female, other, unknown)
+    if tgt_tail == "gender":
         return _parse_gender_dynamic(val)
 
-    # Date and DateTime normalization (e.g. deceasedDateTime, birthDate, effectiveDateTime, valueDateTime)
-    tgt_tail = tgt.split(".")[-1]
-    if "datetime" in tgt_tail or "date" in tgt_tail:
+    # 5. Marital Status (M, S, D, W, L)
+    if "maritalstatus" in tgt:
+        s = str(val).strip().upper()
+        if s.startswith("MARR"):
+            return "M"
+        if s.startswith("SING"):
+            return "S"
+        if s.startswith("DIV"):
+            return "D"
+        if s.startswith("WID"):
+            return "W"
+        if s.startswith("SEP"):
+            return "L"
+        return s[:1] if len(s) == 1 else s
+
+    # 6. Dates and DateTimes across ALL columns (birthDate, deceasedDateTime, effectiveDateTime, period.start/end, etc.)
+    if (
+        "datetime" in tgt_tail
+        or "date" in tgt_tail
+        or "time" in tgt_tail
+        or tgt_tail in ("start", "end", "authoredon", "recorded", "issued", "occurred")
+    ):
         return normalize_fhir_datetime(val, target)
+
+    # 7. Postal / ZIP code (clean Excel floats like 90210.0 -> 90210)
+    if tgt.endswith("postalcode"):
+        s = str(val).strip()
+        if s.endswith(".0"):
+            s = s[:-2]
+        return s
+
+    # 8. Telecom / Email / Phone (clean whitespace)
+    if "telecom" in tgt and tgt.endswith(".value"):
+        return str(val).strip()
+
+    # 9. General String columns (auto-strip whitespace)
+    if isinstance(val, str):
+        return val.strip()
 
     return val
 
@@ -564,16 +599,22 @@ def _sanitize_extensions(node: Any, default_prefix: str = "urn:source:extension"
             else:
                 node.pop("extension", None)
 
-        # 3. Handle non-extension top-level FHIR fields and boolean/integer types
+        # 3. Handle non-extension top-level FHIR fields across ALL columns
         for k, v in list(node.items()):
             if k != "extension":
-                if k in ("multipleBirthBoolean", "deceasedBoolean", "active"):
+                k_lower = k.lower()
+                if k_lower.endswith("boolean") or k_lower == "active":
                     node[k] = _parse_bool_dynamic(v)
-                elif k in ("deceasedDateTime", "birthDate", "effectiveDateTime"):
+                elif "datetime" in k_lower or "date" in k_lower or k_lower in ("start", "end", "authoredon", "recorded", "issued", "occurred"):
                     node[k] = normalize_fhir_datetime(v, k)
-                elif k in ("multipleBirthInteger",):
+                elif k_lower.endswith("integer") or k_lower in ("valuepositiveint", "valueunsignedint"):
                     try:
                         node[k] = _parse_number_dynamic(v, is_int=True)
+                    except (ValueError, TypeError):
+                        pass
+                elif k_lower.endswith("decimal"):
+                    try:
+                        node[k] = _parse_number_dynamic(v, is_int=False)
                     except (ValueError, TypeError):
                         pass
                 node[k] = _sanitize_extensions(node[k], default_prefix)

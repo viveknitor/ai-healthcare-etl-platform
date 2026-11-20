@@ -753,6 +753,69 @@ def test_deceased_datetime_dynamic_normalization():
         assert val_errors == [], f"FHIR validation failed for {val}: {val_errors}"
 
 
+def test_all_columns_universal_dynamic_coercion():
+    """Verify that universal dynamic coercion handles every column type:
+    booleans ('1'/'0'/'Y'/'N'), decimals with currency/commas, integers,
+    marital status codes ('Married' -> 'M'), postal codes ('90210.0' -> '90210'),
+    gender normalization ('female'), and arbitrary extension choice types."""
+    from app.mapping.engine import apply_mapping
+    from app.mapping.models import MappingConfig
+    from app.validation import validate_fhir
+
+    mapping = MappingConfig(
+        name="test_all_cols",
+        target_resource="Patient",
+        status="approved",
+        rules=[
+            {"source": "id", "target": "identifier[0].value", "required": True},
+            {"source": "full_name", "target": "name[0].text"},
+            {"source": "dob_raw", "target": "birthDate"},
+            {"source": "death_raw", "target": "deceasedDateTime"},
+            {"source": "is_active", "target": "active"},
+            {"source": "is_twin", "target": "multipleBirthBoolean"},
+            {"source": "num_children", "target": "extension[2].valueInteger"},
+            {"source": "gender_str", "target": "gender"},
+            {"source": "marital_str", "target": "maritalStatus.coding[0].code"},
+            {"source": "income_str", "target": "extension[0].valueDecimal"},
+            {"source": "zip_excel", "target": "address[0].postalCode"},
+            {"source": "vip_flag", "target": "extension[1].valueBoolean"},
+        ]
+    )
+
+    row = {
+        "id": "MEM-ALL-01",
+        "full_name": "  Dr. Jane Doe, MD  ",
+        "dob_raw": "1980-05-20 00:00:00.000",
+        "death_raw": "2026-08-14T00:00:00",
+        "is_active": "ACTIVE",
+        "is_twin": "Y",
+        "num_children": "2.0",
+        "gender_str": "FEMALE",
+        "marital_str": "Married",
+        "income_str": " $125,000.50 ",
+        "zip_excel": "90210.0",
+        "vip_flag": "1",
+    }
+
+    res, errors = apply_mapping(mapping, row)
+    assert errors == [], f"Unexpected mapping errors: {errors}"
+    assert res["name"][0]["text"] == "Dr. Jane Doe, MD"
+    assert res["birthDate"] == "1980-05-20"
+    assert res["deceasedDateTime"] == "2026-08-14"
+    assert res["active"] is True
+    assert res["multipleBirthBoolean"] is True
+    assert res["extension"][2]["valueInteger"] == 2
+    assert res["gender"] == "female"
+    assert res["maritalStatus"]["coding"][0]["code"] == "M"
+    assert res["extension"][0]["valueDecimal"] == 125000.50
+    assert res["address"][0]["postalCode"] == "90210"
+    assert res["extension"][1]["valueBoolean"] is True
+
+    val_errors = validate_fhir(res)
+    assert val_errors == [], f"FHIR validation failed: {val_errors}"
+
+
+
 
 
 
