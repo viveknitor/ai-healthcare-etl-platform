@@ -123,6 +123,113 @@ def parse_uploaded_file(content: str | bytes, filename: str) -> list[dict]:
     return rows
 
 
+def _process_single_record(
+    i: int,
+    row: dict,
+    mapping: MappingConfig,
+    medplum: MedplumClient | None,
+    dataset_name: str,
+    dry_run: bool,
+    system: str,
+) -> RecordResult:
+    """Transforms, validates, and optionally persists a single record."""
+    source_id = str(row.get("memid") or row.get("member_id") or row.get("id") or row.get("entityid") or f"row-{i+1}")
+
+    try:
+        resource, mapping_errs = apply_mapping(mapping, row)
+    except Exception as e:
+        return RecordResult(
+            source_id=source_id,
+            status="failed",
+            errors=[f"Mapping execution failed: {e}"],
+            source_record=row,
+            target_record={},
+        )
+
+    if mapping_errs:
+        return RecordResult(
+            source_id=source_id,
+            status="invalid",
+            errors=mapping_errs,
+            source_record=row,
+            target_record=resource,
+        )
+
+    # Validate against official FHIR R4 schema
+    val_errors = validate_fhir(resource)
+    if val_errors:
+        return RecordResult(
+            source_id=source_id,
+            status="invalid",
+            errors=val_errors,
+            source_record=row,
+            target_record=resource,
+        )
+
+    summary = extract_clinical_summary(resource)
+
+    # Ensure identifier exists for idempotent conditional upsert
+    identifiers = resource.setdefault("identifier", [])
+    has_source_id = any(isinstance(id_obj, dict) and id_obj.get("system") == system for id_obj in identifiers)
+    if not has_source_id:
+        identifiers.append({"system": system, "value": source_id})
+
+    # Strip client-side transient id or meta
+    resource.pop("id", None)
+    resource.pop("meta", None)
+
+    details = {
+        "source_system": dataset_name,
+        "source_id": source_id,
+        "target_system": "Medplum (FHIR R4)",
+        "target_resource": mapping.target_resource,
+        "idempotent_identifier": f"{system}|{source_id}",
+        "conditional_query": f"?identifier={system}|{source_id}",
+        "mapping_name": mapping.name,
+    }
+
+    recon_pre = generate_dynamic_reconciliation(row, resource, source_name=dataset_name, target_name="Medplum", mapping=mapping)
+
+    if dry_run or medplum is None:
+        return RecordResult(
+            source_id=source_id,
+            status="dry_run",
+            patient_summary=summary,
+            mapping_details=details,
+            reconciliation_table=recon_pre,
+            source_record=row,
+            target_record=resource,
+        )
+
+    try:
+        out = medplum.upsert(resource, system, source_id)
+        is_created = out.get("_is_created", False)
+        details["delivery_action"] = "created" if is_created else "updated"
+        recon_post = generate_dynamic_reconciliation(row, out, source_name=dataset_name, target_name="Medplum", mapping=mapping)
+        log.info("Uploaded record delivered", extra={"ctx": {"id": out.get("id")}})
+        return RecordResult(
+            source_id=source_id,
+            status="delivered",
+            target_id=out.get("id"),
+            patient_summary=summary,
+            mapping_details=details,
+            reconciliation_table=recon_post,
+            source_record=row,
+            target_record=out,
+        )
+    except Exception as e:
+        return RecordResult(
+            source_id=source_id,
+            status="failed",
+            errors=[str(e)],
+            patient_summary=summary,
+            mapping_details=details,
+            reconciliation_table=recon_pre,
+            source_record=row,
+            target_record=resource,
+        )
+
+
 def ingest_uploaded_records(
     medplum: MedplumClient | None,
     rows: list[dict],
@@ -132,123 +239,12 @@ def ingest_uploaded_records(
 ) -> dict:
     """Transforms and ingests rows into FHIR resources via an approved mapping,
     delivering directly to Medplum with dynamic reconciliation tracking."""
-    results: list[RecordResult] = []
     system = f"urn:source:{dataset_name.lower().replace(' ', '-')}"
+    results: list[RecordResult] = []
 
     for i, row in enumerate(rows):
-        source_id = (
-            str(row.get("memid") or row.get("member_id") or row.get("id") or row.get("entityid") or f"row-{i+1}")
-        )
-
-        try:
-            resource, mapping_errs = apply_mapping(mapping, row)
-        except Exception as e:
-            results.append(
-                RecordResult(
-                    source_id=source_id,
-                    status="failed",
-                    errors=[f"Mapping execution failed: {e}"],
-                    source_record=row,
-                    target_record={},
-                )
-            )
-            continue
-
-        if mapping_errs:
-            results.append(
-                RecordResult(
-                    source_id=source_id,
-                    status="invalid",
-                    errors=mapping_errs,
-                    source_record=row,
-                    target_record=resource,
-                )
-            )
-            continue
-
-        # Validate against official FHIR R4 schema
-        val_errors = validate_fhir(resource)
-        if val_errors:
-            results.append(
-                RecordResult(
-                    source_id=source_id,
-                    status="invalid",
-                    errors=val_errors,
-                    source_record=row,
-                    target_record=resource,
-                )
-            )
-            continue
-
-        summary = extract_clinical_summary(resource)
-
-        # Ensure identifier exists for idempotent conditional upsert
-        identifiers = resource.setdefault("identifier", [])
-        has_source_id = any(isinstance(id_obj, dict) and id_obj.get("system") == system for id_obj in identifiers)
-        if not has_source_id:
-            identifiers.append({"system": system, "value": source_id})
-
-        # Strip client-side transient id or meta
-        resource.pop("id", None)
-        resource.pop("meta", None)
-
-        details = {
-            "source_system": dataset_name,
-            "source_id": source_id,
-            "target_system": "Medplum (FHIR R4)",
-            "target_resource": mapping.target_resource,
-            "idempotent_identifier": f"{system}|{source_id}",
-            "conditional_query": f"?identifier={system}|{source_id}",
-            "mapping_name": mapping.name,
-        }
-
-        recon_pre = generate_dynamic_reconciliation(row, resource, source_name=dataset_name, target_name="Medplum", mapping=mapping)
-
-        if dry_run or medplum is None:
-            results.append(
-                RecordResult(
-                    source_id=source_id,
-                    status="dry_run",
-                    patient_summary=summary,
-                    mapping_details=details,
-                    reconciliation_table=recon_pre,
-                    source_record=row,
-                    target_record=resource,
-                )
-            )
-            continue
-
-        try:
-            out = medplum.upsert(resource, system, source_id)
-            is_created = out.get("_is_created", False)
-            details["delivery_action"] = "created" if is_created else "updated"
-            recon_post = generate_dynamic_reconciliation(row, out, source_name=dataset_name, target_name="Medplum", mapping=mapping)
-            results.append(
-                RecordResult(
-                    source_id=source_id,
-                    status="delivered",
-                    target_id=out.get("id"),
-                    patient_summary=summary,
-                    mapping_details=details,
-                    reconciliation_table=recon_post,
-                    source_record=row,
-                    target_record=out,
-                )
-            )
-            log.info("Uploaded record delivered", extra={"ctx": {"id": out.get("id")}})
-        except Exception as e:
-            results.append(
-                RecordResult(
-                    source_id=source_id,
-                    status="failed",
-                    errors=[str(e)],
-                    patient_summary=summary,
-                    mapping_details=details,
-                    reconciliation_table=recon_pre,
-                    source_record=row,
-                    target_record=resource,
-                )
-            )
+        res = _process_single_record(i, row, mapping, medplum, dataset_name, dry_run, system)
+        results.append(res)
 
     counts: dict[str, int] = {}
     for r in results:
@@ -257,5 +253,36 @@ def ingest_uploaded_records(
     return {
         "summary": {"total": len(results), "counts": counts},
         "results": [asdict(r) for r in results],
+    }
+
+
+def stream_uploaded_records(
+    medplum: MedplumClient | None,
+    rows: list[dict],
+    mapping: MappingConfig,
+    dataset_name: str = "upload",
+    dry_run: bool = True,
+):
+    """Yields progress events row-by-row via Server-Sent Events (SSE)."""
+    system = f"urn:source:{dataset_name.lower().replace(' ', '-')}"
+    counts = {"delivered": 0, "dry_run": 0, "invalid": 0, "failed": 0}
+
+    for i, row in enumerate(rows):
+        res = _process_single_record(i, row, mapping, medplum, dataset_name, dry_run, system)
+        counts[res.status] = counts.get(res.status, 0) + 1
+        yield {
+            "type": "record",
+            "index": i + 1,
+            "total": len(rows),
+            "result": asdict(res),
+            "current_counts": dict(counts),
+        }
+
+    yield {
+        "type": "complete",
+        "summary": {
+            "total": len(rows),
+            "counts": dict(counts),
+        },
     }
 

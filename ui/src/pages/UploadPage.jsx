@@ -85,6 +85,19 @@ export default function UploadPage() {
   const [isDelivered, setIsDelivered] = useState(false);
   const [llmMetrics, setLlmMetrics] = useState(null);
   const [healedChanges, setHealedChanges] = useState([]);
+  const [streamState, setStreamState] = useState({
+    active: false,
+    current: 0,
+    total: 0,
+    speed: 0,
+    eta: 0,
+    percent: 0,
+  });
+  const abortControllerRef = useRef(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const handleFileUpload = async (file) => {
     if (!file) return;
@@ -184,29 +197,22 @@ export default function UploadPage() {
     setIsDelivered(false);
   };
 
+  const stopStream = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setStreamState((prev) => ({ ...prev, active: false }));
+      setBusy("");
+    }
+  };
+
   const runIngestion = async (dryRun) => {
     if (!fileData?.all_rows || !mapping) return;
 
     // Quality Gate: Mandatory validation before delivering to Medplum
     if (!dryRun && !isValidated) {
-      alert("🛡️ Mandatory Quality Gate: Pre-flight validation is required before delivering to Medplum. Running validation now...");
-      setBusy("validating");
-      setError("");
-      try {
-        const valRes = await api.executeUploadIngestion(fileData.all_rows, mapping, true, datasetName);
-        setReport(valRes);
-        const hasErr = (valRes.summary?.counts?.invalid || 0) > 0 || (valRes.summary?.counts?.failed || 0) > 0;
-        if (hasErr) {
-          setError("Validation failed. Please review mapping errors before delivering to Medplum.");
-          setBusy("");
-          return;
-        }
-        setIsValidated(true);
-      } catch (e) {
-        setError(`Validation check failed: ${e.message}`);
-        setBusy("");
-        return;
-      }
+      alert("🛡️ Mandatory Quality Gate: Pre-flight validation is required before delivering to Medplum. Please run 'Step 1: Validate Schema' first.");
+      return;
     }
 
     if (
@@ -220,27 +226,83 @@ export default function UploadPage() {
 
     setBusy(dryRun ? "validating" : "delivering");
     setError("");
+    setCurrentPage(1);
+
+    const total = fileData.all_rows.length;
+    setStreamState({
+      active: true,
+      current: 0,
+      total,
+      speed: 0,
+      eta: 0,
+      percent: 0,
+    });
+
+    setReport({
+      summary: { total, counts: { delivered: 0, dry_run: 0, invalid: 0, failed: 0 } },
+      results: [],
+    });
+
+    const startTime = performance.now();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
-      const res = await api.executeUploadIngestion(
-        fileData.all_rows,
+      await api.executeUploadIngestionStream({
+        rows: fileData.all_rows,
         mapping,
-        dryRun,
-        datasetName
-      );
-      setReport(res);
-      if (dryRun) {
-        const hasErr = (res.summary?.counts?.invalid || 0) > 0 || (res.summary?.counts?.failed || 0) > 0;
-        if (!hasErr) {
-          setIsValidated(true);
-        } else {
-          setIsValidated(false);
-        }
-      } else {
-        setIsDelivered(true);
-      }
+        dry_run: dryRun,
+        dataset_name: datasetName,
+        signal: controller.signal,
+        onRecord: (event) => {
+          setReport((prev) => ({
+            summary: {
+              total: event.total,
+              counts: event.current_counts,
+            },
+            results: [...(prev?.results || []), event.result],
+          }));
+
+          const elapsedSec = (performance.now() - startTime) / 1000;
+          const speed = elapsedSec > 0 ? Math.round(event.index / elapsedSec) : 0;
+          const remaining = event.total - event.index;
+          const eta = speed > 0 ? (remaining / speed).toFixed(1) : 0;
+
+          setStreamState({
+            active: true,
+            current: event.index,
+            total: event.total,
+            speed,
+            eta,
+            percent: Math.round((event.index / event.total) * 100),
+          });
+        },
+        onComplete: (completeEvent) => {
+          setStreamState((prev) => ({ ...prev, active: false, percent: 100 }));
+          setBusy("");
+          const counts = completeEvent.summary?.counts || {};
+          const hasErr = (counts.invalid || 0) > 0 || (counts.failed || 0) > 0;
+          if (dryRun) {
+            if (!hasErr && (completeEvent.summary?.total || 0) > 0) {
+              setIsValidated(true);
+            } else {
+              setIsValidated(false);
+            }
+          } else {
+            setIsDelivered(true);
+          }
+        },
+        onError: (err) => {
+          setError(`Streaming error: ${err.message}`);
+          setStreamState((prev) => ({ ...prev, active: false }));
+          setBusy("");
+        },
+      });
     } catch (e) {
-      setError(e.message);
-    } finally {
+      if (e.name !== "AbortError") {
+        setError(e.message);
+      }
+      setStreamState((prev) => ({ ...prev, active: false }));
       setBusy("");
     }
   };
@@ -263,27 +325,10 @@ export default function UploadPage() {
           setLlmMetrics(healRes.metadata.llm_metrics);
         }
         setHealedChanges(healRes.changes || ["Auto-repaired schema violations"]);
-
-        // Immediately re-run pre-flight validation with the healed rules
-        setBusy("validating");
-        const retest = await api.executeUploadIngestion(
-          fileData.all_rows,
-          approvedMapping,
-          true,
-          datasetName
-        );
-        setReport(retest);
-        const stillHasErr =
-          (retest.summary?.counts?.invalid || 0) > 0 || (retest.summary?.counts?.failed || 0) > 0;
-        if (!stillHasErr) {
-          setIsValidated(true);
-        } else {
-          setIsValidated(false);
-        }
+        setBusy("");
       }
     } catch (e) {
       setError(`AI Self-Healing failed: ${e.message}`);
-    } finally {
       setBusy("");
     }
   };
@@ -344,6 +389,27 @@ export default function UploadPage() {
     link.download = `${datasetName}_Medplum_Ingestion_Bundle.json`;
     link.click();
   };
+
+  const filteredResults = (report?.results || []).filter((r) => {
+    if (statusFilter !== "ALL") {
+      const actualStatus = r.status === "dry_run" ? "validated" : r.status;
+      if (actualStatus !== statusFilter && r.status !== statusFilter) return false;
+    }
+    if (searchTerm.trim()) {
+      const q = searchTerm.toLowerCase();
+      const matchId = String(r.source_id || "").toLowerCase().includes(q);
+      const matchTitle = String(r.patient_summary?.title || "").toLowerCase().includes(q);
+      const matchTarget = String(r.target_id || "").toLowerCase().includes(q);
+      if (!matchId && !matchTitle && !matchTarget) return false;
+    }
+    return true;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filteredResults.length / pageSize));
+  const paginatedResults = filteredResults.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  );
 
   const approved = mapping?.status === "approved";
 
@@ -666,11 +732,75 @@ export default function UploadPage() {
       {/* 4. Ingestion Results Table & Medplum Persisted Record Inspector */}
       {report && (
         <div className="card">
+          {/* Live Real-Time Streaming Progress Dashboard */}
+          {(streamState.active || streamState.current > 0) && (
+            <div
+              style={{
+                background: "linear-gradient(135deg, rgba(15, 23, 42, 0.8) 0%, rgba(30, 41, 59, 0.8) 100%)",
+                border: "1px solid rgba(56, 189, 248, 0.3)",
+                borderRadius: "var(--radius-md)",
+                padding: "14px 18px",
+                marginBottom: "16px",
+                boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
+              }}
+            >
+              <div className="row between" style={{ margin: "0 0 8px", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{ fontSize: "16px" }}>{streamState.active ? "⚡" : "✓"}</span>
+                  <strong style={{ fontSize: "14px", color: "#fff" }}>
+                    {streamState.active ? "Live Row-by-Row Streaming Active" : "Ingestion Processing Complete"}
+                  </strong>
+                  <span className={`chip ${streamState.active ? "info" : "ok"}`} style={{ fontSize: "11px" }}>
+                    {streamState.current} / {streamState.total} Records ({streamState.percent}%)
+                  </span>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "12px" }}>
+                  <span style={{ color: "var(--brand)" }}>
+                    🚀 <strong>{streamState.speed}</strong> rec/sec
+                  </span>
+                  {streamState.active && (
+                    <span style={{ color: "var(--text-muted)" }}>
+                      ⏱️ Est. Remaining: <strong>{streamState.eta}s</strong>
+                    </span>
+                  )}
+                  {streamState.active && (
+                    <button className="danger sm" onClick={stopStream} style={{ padding: "3px 8px", fontSize: "11px" }}>
+                      ⏹ Stop Stream
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Animated Progress Bar */}
+              <div
+                style={{
+                  width: "100%",
+                  height: "8px",
+                  background: "rgba(255, 255, 255, 0.1)",
+                  borderRadius: "4px",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    width: `${streamState.percent}%`,
+                    height: "100%",
+                    background: "linear-gradient(90deg, #38bdf8 0%, #3b82f6 50%, #10b981 100%)",
+                    borderRadius: "4px",
+                    transition: "width 0.15s ease",
+                    boxShadow: "0 0 10px rgba(56, 189, 248, 0.5)",
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
           <div className="row between" style={{ marginTop: 0, marginBottom: "12px" }}>
             <div>
               <h2>Ingestion Results: {fileData?.filename}</h2>
               <p className="sub-meta">
-                Processed {report.summary?.total} records using mapping <code>{mapping?.name}</code>.
+                Streamed {report.results?.length || 0} of {report.summary?.total} records using mapping <code>{mapping?.name}</code>.
               </p>
             </div>
 
@@ -699,6 +829,97 @@ export default function UploadPage() {
             </div>
           </div>
 
+          {/* High-Volume Search & Pagination Filter Bar */}
+          <div
+            className="row between"
+            style={{
+              margin: "0 0 12px",
+              padding: "8px 12px",
+              background: "rgba(0,0,0,0.25)",
+              borderRadius: "var(--radius-sm)",
+              border: "1px solid var(--card-border)",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: "10px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+              <input
+                type="text"
+                placeholder="🔍 Search ID or Name..."
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+                style={{ width: "190px", padding: "4px 8px", fontSize: "12px" }}
+              />
+              <div style={{ display: "flex", gap: "4px" }}>
+                {["ALL", "delivered", "dry_run", "invalid", "failed"].map((st) => {
+                  const count =
+                    st === "ALL"
+                      ? report.results?.length || 0
+                      : report.summary?.counts?.[st] || 0;
+                  if (st !== "ALL" && count === 0) return null;
+                  return (
+                    <button
+                      key={st}
+                      className={`secondary sm ${statusFilter === st ? "active-pill" : ""}`}
+                      style={{ fontSize: "11px", padding: "3px 8px" }}
+                      onClick={() => {
+                        setStatusFilter(st);
+                        setCurrentPage(1);
+                      }}
+                    >
+                      {st === "dry_run" ? "validated" : st} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "12px" }}>
+              <span style={{ color: "var(--text-muted)" }}>
+                Showing {filteredResults.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}–
+                {Math.min(currentPage * pageSize, filteredResults.length)} of {filteredResults.length}
+              </span>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+                style={{ padding: "3px 6px", fontSize: "12px" }}
+              >
+                <option value={15}>15 / page</option>
+                <option value={25}>25 / page</option>
+                <option value={50}>50 / page</option>
+                <option value={100}>100 / page</option>
+              </select>
+              <div style={{ display: "flex", gap: "4px" }}>
+                <button
+                  className="secondary sm"
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  style={{ padding: "3px 8px", fontSize: "11px" }}
+                >
+                  ← Prev
+                </button>
+                <span style={{ padding: "3px 6px", fontWeight: 600 }}>
+                  {currentPage} / {totalPages}
+                </span>
+                <button
+                  className="secondary sm"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  style={{ padding: "3px 8px", fontSize: "11px" }}
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
+          </div>
+
           <table>
             <thead>
               <tr>
@@ -711,7 +932,8 @@ export default function UploadPage() {
               </tr>
             </thead>
             <tbody>
-              {report.results?.map((r, i) => {
+              {paginatedResults.map((r, idx) => {
+                const i = (currentPage - 1) * pageSize + idx;
                 const s = r.patient_summary || {};
                 const m = r.mapping_details || {};
                 const deliveryAction = m.delivery_action;

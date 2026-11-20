@@ -1,5 +1,7 @@
+import json
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from .config import get_settings
@@ -11,7 +13,7 @@ from .mapping.models import MappingConfig
 from .mapping.storage import list_mappings, load_mapping, save_mapping
 from .mapping.suggest import SuggestError, suggest_mapping
 from .pipeline import generate_dynamic_reconciliation, run_hapi_to_medplum
-from .upload_pipeline import ingest_uploaded_records, parse_uploaded_file
+from .upload_pipeline import ingest_uploaded_records, parse_uploaded_file, stream_uploaded_records
 from .validation import validate_fhir
 
 app = FastAPI(title="Healthcare ETL")
@@ -179,4 +181,30 @@ def execute_upload_ingestion(req: UploadExecuteRequest):
         mapping=req.mapping,
         dataset_name=req.dataset_name,
         dry_run=req.dry_run,
+    )
+
+
+@app.post("/upload/execute-stream")
+def execute_upload_stream(req: UploadExecuteRequest):
+    s = get_settings()
+    medplum = None if req.dry_run else MedplumClient(s.medplum_base_url, s.medplum_client_id, s.medplum_client_secret)
+
+    def event_generator():
+        for event in stream_uploaded_records(
+            medplum=medplum,
+            rows=req.rows,
+            mapping=req.mapping,
+            dataset_name=req.dataset_name,
+            dry_run=req.dry_run,
+        ):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )

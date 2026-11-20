@@ -603,6 +603,36 @@ def test_auto_heal_endpoint():
         assert data["changes"] == ["Healed field"]
 
 
+def test_stream_uploaded_records():
+    """Verify stream_uploaded_records yields event objects row-by-row and finishes with complete event."""
+    from app.upload_pipeline import stream_uploaded_records
+    from app.mapping.models import MappingConfig
+
+    mapping = MappingConfig(
+        name="test_stream",
+        target_resource="Patient",
+        status="approved",
+        rules=[{"source": "id", "target": "identifier[0].value"}]
+    )
+
+    rows = [{"id": f"PAT-{i}"} for i in range(1, 4)]
+    events = list(stream_uploaded_records(None, rows, mapping, dataset_name="stream_test", dry_run=True))
+
+    # 3 record events + 1 complete event
+    assert len(events) == 4
+    for i in range(3):
+        assert events[i]["type"] == "record"
+        assert events[i]["index"] == i + 1
+        assert events[i]["total"] == 3
+        assert events[i]["result"]["status"] == "dry_run"
+
+    complete = events[3]
+    assert complete["type"] == "complete"
+    assert complete["summary"]["total"] == 3
+    assert complete["summary"]["counts"]["dry_run"] == 3
+
+
+
 
 
 
