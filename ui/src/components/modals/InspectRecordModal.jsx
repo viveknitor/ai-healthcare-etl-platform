@@ -86,3 +86,4 @@ export default function InspectRecordModal({ activeRecord, targetResource, onClo
     </div>
   );
 }
+

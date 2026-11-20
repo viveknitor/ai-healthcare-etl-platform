@@ -9,6 +9,7 @@ import Step4ReconciliationHub from "../components/wizard/Step4ReconciliationHub.
 import EditRecordModal from "../components/modals/EditRecordModal.jsx";
 import InspectRecordModal from "../components/modals/InspectRecordModal.jsx";
 import AddRecordModal from "../components/modals/AddRecordModal.jsx";
+import DeliveryConfirmationModal from "../components/modals/DeliveryConfirmationModal.jsx";
 
 const SAMPLE_PLANDATA_ROWS = [
   {
@@ -113,6 +114,141 @@ export default function UploadPage() {
   const [editingError, setEditingError] = useState("");
   const [isAddingRecord, setIsAddingRecord] = useState(false);
   const [addRecordError, setAddRecordError] = useState("");
+  const [confirmDeliveryModalOpen, setConfirmDeliveryModalOpen] = useState(false);
+
+  // Computed schema contract field coverage & headers
+  const allHeaders = fileData?.headers || [];
+  const mappedSources = new Set((mapping?.rules || []).map((r) => r.source));
+  const unmappedHeaders = allHeaders.filter((h) => !mappedSources.has(h));
+
+  const handleMapAllRemaining = () => {
+    if (!mapping) return;
+    let extIdx = (mapping.rules || []).filter(
+      (r) => r.target && r.target.startsWith("extension[")
+    ).length;
+    const newRules = unmappedHeaders.map((col) => {
+      let valType = "valueString";
+      const lower = col.toLowerCase();
+      if (
+        lower.includes("income") ||
+        lower.includes("amount") ||
+        lower.includes("cost") ||
+        lower.includes("rate") ||
+        lower.includes("price") ||
+        lower.includes("salary")
+      ) {
+        valType = "valueDecimal";
+      } else if (
+        lower.startsWith("is") ||
+        lower.startsWith("has") ||
+        lower.includes("flag") ||
+        lower.includes("active")
+      ) {
+        valType = "valueBoolean";
+      }
+      return {
+        source: col,
+        target: `extension[${extIdx++}].${valType}`,
+        transform: valType === "valueBoolean" ? "map" : "direct",
+        confidence: 0.85,
+        rationale: `Mapped remaining source column ${col} to FHIR R4 extension`,
+        required: false,
+      };
+    });
+    setMapping({
+      ...mapping,
+      status: "pending_review",
+      rules: [...(mapping.rules || []), ...newRules],
+    });
+    setIsValidated(false);
+    setIsDelivered(false);
+  };
+
+  const handleMapSingleExtension = (col) => {
+    if (!mapping) return;
+    const extIdx = (mapping.rules || []).filter(
+      (r) => r.target && r.target.startsWith("extension[")
+    ).length;
+    let valType = "valueString";
+    const lower = col.toLowerCase();
+    if (
+      lower.includes("income") ||
+      lower.includes("amount") ||
+      lower.includes("cost") ||
+      lower.includes("rate")
+    ) {
+      valType = "valueDecimal";
+    } else if (
+      lower.startsWith("is") ||
+      lower.startsWith("has") ||
+      lower.includes("flag")
+    ) {
+      valType = "valueBoolean";
+    }
+    const newRule = {
+      source: col,
+      target: `extension[${extIdx}].${valType}`,
+      transform: valType === "valueBoolean" ? "map" : "direct",
+      confidence: 0.85,
+      rationale: `Mapped source column ${col} to FHIR R4 extension`,
+      required: false,
+    };
+    setMapping({
+      ...mapping,
+      status: "pending_review",
+      rules: [...(mapping.rules || []), newRule],
+    });
+    setIsValidated(false);
+    setIsDelivered(false);
+  };
+
+  const handleEditRuleField = (idx, field, value) => {
+    if (!mapping?.rules) return;
+    const updated = [...mapping.rules];
+    updated[idx] = { ...updated[idx], [field]: value };
+    setMapping({ ...mapping, status: "pending_review", rules: updated });
+    setIsValidated(false);
+    setIsDelivered(false);
+  };
+
+  const handleRemoveRule = (idx) => {
+    if (!mapping?.rules) return;
+    const updated = mapping.rules.filter((_, i) => i !== idx);
+    setMapping({ ...mapping, status: "pending_review", rules: updated });
+    setIsValidated(false);
+    setIsDelivered(false);
+  };
+
+  const handleAddRule = () => {
+    const src = prompt("Enter source column name:");
+    if (!src) return;
+    const tgt = prompt("Enter target FHIR path:", `extension[0].valueString`);
+    if (!tgt) return;
+    const newRule = {
+      source: src.trim(),
+      target: tgt.trim(),
+      transform: "direct",
+      required: false,
+      confidence: 1.0,
+      rationale: "Custom user-added rule",
+    };
+    setMapping({
+      ...mapping,
+      status: "pending_review",
+      rules: [...(mapping.rules || []), newRule],
+    });
+    setIsValidated(false);
+    setIsDelivered(false);
+  };
+
+  const handleInitiateDelivery = () => {
+    const invalidCount = report?.summary?.counts?.invalid || 0;
+    if (invalidCount > 0) {
+      setConfirmDeliveryModalOpen(true);
+    } else {
+      runIngestion(false);
+    }
+  };
 
   // Determine maximum unlocked step
   let maxUnlockedStep = 1;
@@ -708,33 +844,18 @@ export default function UploadPage() {
           mapping={mapping}
           llmMetrics={llmMetrics}
           targetResource={targetResource}
+          allHeaders={allHeaders}
+          mappedSources={mappedSources}
+          unmappedHeaders={unmappedHeaders}
           onSynthesize={() => synthesizeMapping()}
           onApprove={approveMapping}
           onProceed={() => setCurrentStep(3)}
           busy={busy}
-          onEditRule={(idx) => {
-            const rule = mapping.rules[idx];
-            const newTgt = prompt("Enter new target FHIR path:", rule.target);
-            if (newTgt !== null && newTgt.trim()) {
-              const updated = [...mapping.rules];
-              updated[idx] = { ...rule, target: newTgt.trim() };
-              setMapping({ ...mapping, rules: updated });
-            }
-          }}
-          onDeleteRule={(idx) => {
-            if (window.confirm("Delete this mapping rule?")) {
-              const updated = mapping.rules.filter((_, i) => i !== idx);
-              setMapping({ ...mapping, rules: updated });
-            }
-          }}
-          onAddRule={() => {
-            const src = prompt("Enter source column name:");
-            if (!src) return;
-            const tgt = prompt("Enter target FHIR path:", `identifier[0].value`);
-            if (!tgt) return;
-            const newRule = { source: src.trim(), target: tgt.trim(), transform: "direct", required: false, confidence: 1.0 };
-            setMapping({ ...mapping, rules: [...mapping.rules, newRule] });
-          }}
+          onMapAllRemaining={handleMapAllRemaining}
+          onMapSingleExtension={handleMapSingleExtension}
+          onEditRule={handleEditRuleField}
+          onRemoveRule={handleRemoveRule}
+          onAddRule={handleAddRule}
         />
       )}
 
@@ -749,6 +870,7 @@ export default function UploadPage() {
           llmMetrics={llmMetrics}
           onRunValidation={() => runIngestion(true)}
           onTriggerAutoHeal={() => triggerSelfHeal()}
+          onInitiateDelivery={handleInitiateDelivery}
           onProceed={() => setCurrentStep(4)}
           onViewInvalid={() => {
             setStatusFilter("invalid");
@@ -778,7 +900,7 @@ export default function UploadPage() {
           paginatedResults={paginatedResults}
           filteredResults={filteredResults}
           totalPages={totalPages}
-          onRunIngestion={runIngestion}
+          onRunIngestion={handleInitiateDelivery}
           onDownloadReport={downloadReport}
           onDownloadJSON={downloadJSONReport}
           onStartAddRecord={() => setIsAddingRecord(true)}
@@ -810,6 +932,31 @@ export default function UploadPage() {
         onClose={() => setIsAddingRecord(false)}
         onSave={handleSaveAddRecord}
         error={addRecordError}
+      />
+
+      <DeliveryConfirmationModal
+        isOpen={confirmDeliveryModalOpen}
+        onClose={() => setConfirmDeliveryModalOpen(false)}
+        onConfirm={() => {
+          setConfirmDeliveryModalOpen(false);
+          runIngestion(false);
+        }}
+        onReviewQuarantine={() => {
+          setConfirmDeliveryModalOpen(false);
+          setStatusFilter("invalid");
+          setCurrentStep(4);
+        }}
+        validCount={
+          scenarioCounts.validated ||
+          Math.max(
+            0,
+            (report?.summary?.total || fileData?.total_rows || 0) -
+              (report?.summary?.counts?.invalid || 0)
+          )
+        }
+        invalidCount={report?.summary?.counts?.invalid || 0}
+        targetResource={targetResource}
+        datasetName={datasetName}
       />
     </section>
   );

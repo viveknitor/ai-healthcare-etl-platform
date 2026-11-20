@@ -4,6 +4,7 @@ export default function MappingContractViewer({
   mapping,
   onEditRule,
   onRemoveRule,
+  onAddRule,
   approved,
   allHeaders = [],
   mappedSources = new Set(),
@@ -13,6 +14,8 @@ export default function MappingContractViewer({
 }) {
   const [viewMode, setViewMode] = useState("table"); // "table" | "json" | "flow"
   const [copied, setCopied] = useState(false);
+  const [ruleSearch, setRuleSearch] = useState("");
+  const [ruleFilter, setRuleFilter] = useState("ALL"); // "ALL" | "REQUIRED" | "OPTIONAL"
 
   if (!mapping) return null;
 
@@ -122,18 +125,29 @@ export default function MappingContractViewer({
             <span>{allHeaders.length} Total Columns</span>
           </div>
 
-          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-            <span className={`chip ${unmappedHeaders.length === 0 ? "ok" : "warn"}`} style={{ fontSize: "11px" }}>
-              {Math.round((mappedSources.size / Math.max(1, allHeaders.length)) * 100)}% Coverage
+          <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+            <span
+              className={`chip ${unmappedHeaders.length === 0 ? "ok" : "warn"}`}
+              style={{ fontSize: "11px", fontWeight: 700 }}
+            >
+              {allHeaders.length > 0
+                ? `${Math.round((mappedSources.size / Math.max(1, allHeaders.length)) * 100)}% Coverage`
+                : `${mapping.rules?.length || 0} Rules`}
             </span>
-            {unmappedHeaders.length > 0 && (
+            {unmappedHeaders.length > 0 && onMapAllRemaining && (
               <button
-                className="secondary sm"
-                style={{ fontSize: "11px", padding: "2px 8px" }}
+                className="primary sm"
+                style={{
+                  fontSize: "11px",
+                  padding: "4px 10px",
+                  background: "linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)",
+                  borderColor: "rgba(59, 130, 246, 0.5)",
+                  boxShadow: "0 2px 8px rgba(59, 130, 246, 0.3)",
+                }}
                 onClick={onMapAllRemaining}
-                title="Automatically map all remaining unmapped columns as FHIR R4 Extensions"
+                title={`Automatically map all remaining ${unmappedHeaders.length} unmapped columns as FHIR R4 Extensions (achieving 100% coverage)`}
               >
-                ✨ Map All Remaining as Extensions
+                ✨ Map All {unmappedHeaders.length} Remaining Columns as Extensions ({allHeaders.length}/{allHeaders.length} • 100%)
               </button>
             )}
           </div>
@@ -169,99 +183,182 @@ export default function MappingContractViewer({
       </div>
 
       {/* VIEW 1: INTERACTIVE TABLE */}
-      {viewMode === "table" && (
-        <table>
-          <thead>
-            <tr>
-              <th style={{ width: "22%" }}>Source Column</th>
-              <th style={{ width: "30%" }}>Target FHIR Path</th>
-              <th style={{ width: "20%" }}>Transform</th>
-              <th style={{ width: "12%" }}>Confidence</th>
-              <th style={{ width: "10%", textAlign: "right" }} />
-            </tr>
-          </thead>
-          <tbody>
-            {mapping.rules?.map((r, i) => (
-              <tr key={i} title={r.rationale || ""}>
-                <td>
-                  <input
-                    value={r.source}
-                    onChange={(e) => onEditRule(i, "source", e.target.value)}
-                    style={{ padding: "4px 8px", fontSize: "12px", width: "100%" }}
-                  />
-                </td>
-                <td>
-                  <input
-                    value={r.target}
-                    onChange={(e) => onEditRule(i, "target", e.target.value)}
-                    style={{
-                      padding: "4px 8px",
-                      fontSize: "12px",
-                      width: "100%",
-                      fontFamily: "monospace",
-                    }}
-                  />
-                </td>
-                <td>
-                  <select
-                    value={r.transform || "direct"}
-                    onChange={(e) => onEditRule(i, "transform", e.target.value)}
-                    style={{ padding: "4px 8px", fontSize: "12px", width: "100%" }}
-                  >
-                    <option value="direct">direct</option>
-                    <option value="date">date</option>
-                    <option value="map">map</option>
-                    <option value="upper">upper</option>
-                    <option value="lower">lower</option>
-                    <option value="strip">strip</option>
-                  </select>
-                </td>
-                <td>
-                  <span
-                    className="chip"
-                    style={{
-                      background: (r.confidence || 1) >= 0.9 ? "rgba(16, 185, 129, 0.15)" : "rgba(245, 158, 11, 0.15)",
-                      color: (r.confidence || 1) >= 0.9 ? "var(--ok)" : "var(--warn)",
-                      fontSize: "11px",
-                    }}
-                  >
-                    {Math.round((r.confidence || 1) * 100)}%
-                  </span>
-                  {(r.notes?.includes("Self-healed") || r.notes?.includes("healed")) && (
-                    <span
-                      className="chip"
-                      style={{
-                        background: "rgba(168, 85, 247, 0.2)",
-                        color: "#c084fc",
-                        border: "1px solid rgba(168, 85, 247, 0.4)",
-                        fontSize: "10px",
-                        marginLeft: "4px",
-                      }}
-                      title={r.notes}
-                    >
-                      🩹 Healed
-                    </span>
-                  )}
-                </td>
-                <td style={{ textAlign: "right" }}>
-                  <button
-                    className="secondary sm"
-                    onClick={() => onRemoveRule(i)}
-                    style={{
-                      color: "var(--bad)",
-                      borderColor: "rgba(239, 68, 68, 0.3)",
-                      padding: "2px 8px",
-                    }}
-                    title="Remove rule"
-                  >
-                    ✕
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      {viewMode === "table" && (() => {
+        const rules = mapping.rules || [];
+        const filteredRules = rules.filter((r) => {
+          if (ruleFilter === "REQUIRED" && !r.required) return false;
+          if (ruleFilter === "OPTIONAL" && r.required) return false;
+          if (ruleSearch.trim()) {
+            const q = ruleSearch.toLowerCase();
+            const matchSrc = String(r.source || "").toLowerCase().includes(q);
+            const matchTgt = String(r.target || "").toLowerCase().includes(q);
+            const matchTransform = String(r.transform || "").toLowerCase().includes(q);
+            if (!matchSrc && !matchTgt && !matchTransform) return false;
+          }
+          return true;
+        });
+
+        return (
+          <>
+            <div
+              className="row between"
+              style={{
+                alignItems: "center",
+                marginBottom: "12px",
+                flexWrap: "wrap",
+                gap: "10px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                <input
+                  type="text"
+                  placeholder="🔍 Search rules (source, target, transform)..."
+                  value={ruleSearch}
+                  onChange={(e) => setRuleSearch(e.target.value)}
+                  style={{ width: "230px", padding: "5px 10px", fontSize: "12px" }}
+                />
+                <button
+                  className={`secondary sm ${ruleFilter === "ALL" ? "active-pill" : ""}`}
+                  onClick={() => setRuleFilter("ALL")}
+                >
+                  All ({rules.length})
+                </button>
+                <button
+                  className={`secondary sm ${ruleFilter === "REQUIRED" ? "active-pill" : ""}`}
+                  onClick={() => setRuleFilter("REQUIRED")}
+                >
+                  Required ({rules.filter((r) => r.required).length})
+                </button>
+                <button
+                  className={`secondary sm ${ruleFilter === "OPTIONAL" ? "active-pill" : ""}`}
+                  onClick={() => setRuleFilter("OPTIONAL")}
+                >
+                  Optional ({rules.filter((r) => !r.required).length})
+                </button>
+              </div>
+
+              {onAddRule && (
+                <button
+                  className="secondary sm"
+                  onClick={onAddRule}
+                  title="Add a custom mapping rule"
+                >
+                  ➕ Add Custom Rule
+                </button>
+              )}
+            </div>
+
+            <div style={{ overflowX: "auto", maxHeight: "450px", borderRadius: "var(--radius-sm)", border: "1px solid var(--card-border)" }}>
+              <table style={{ margin: 0, fontSize: "12px" }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: "22%" }}>Source Column</th>
+                    <th style={{ width: "28%" }}>Target FHIR Path</th>
+                    <th style={{ width: "16%" }}>Transform</th>
+                    <th style={{ width: "12%" }}>Confidence</th>
+                    <th style={{ width: "12%" }}>Type</th>
+                    <th style={{ width: "10%", textAlign: "right" }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRules.map((r) => {
+                    const i = rules.indexOf(r);
+                    return (
+                      <tr key={i} title={r.rationale || ""}>
+                        <td>
+                          <input
+                            value={r.source}
+                            onChange={(e) => onEditRule(i, "source", e.target.value)}
+                            style={{ padding: "4px 8px", fontSize: "12px", width: "100%" }}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            value={r.target}
+                            onChange={(e) => onEditRule(i, "target", e.target.value)}
+                            style={{
+                              padding: "4px 8px",
+                              fontSize: "12px",
+                              width: "100%",
+                              fontFamily: "monospace",
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <select
+                            value={r.transform || "direct"}
+                            onChange={(e) => onEditRule(i, "transform", e.target.value)}
+                            style={{ padding: "4px 8px", fontSize: "12px", width: "100%" }}
+                          >
+                            <option value="direct">direct</option>
+                            <option value="date">date</option>
+                            <option value="map">map</option>
+                            <option value="upper">upper</option>
+                            <option value="lower">lower</option>
+                            <option value="strip">strip</option>
+                          </select>
+                        </td>
+                        <td>
+                          <span
+                            className="chip"
+                            style={{
+                              background:
+                                (r.confidence || 1) >= 0.9
+                                  ? "rgba(16, 185, 129, 0.15)"
+                                  : "rgba(245, 158, 11, 0.15)",
+                              color: (r.confidence || 1) >= 0.9 ? "var(--ok)" : "var(--warn)",
+                              fontSize: "11px",
+                            }}
+                          >
+                            {Math.round((r.confidence || 1) * 100)}%
+                          </span>
+                          {(r.notes?.includes("Self-healed") || r.notes?.includes("healed")) && (
+                            <span
+                              className="chip"
+                              style={{
+                                background: "rgba(168, 85, 247, 0.2)",
+                                color: "#c084fc",
+                                border: "1px solid rgba(168, 85, 247, 0.4)",
+                                fontSize: "10px",
+                                marginLeft: "4px",
+                              }}
+                              title={r.notes}
+                            >
+                              🩹 Healed
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          <span
+                            className={`chip ${r.required ? "warn" : "info"}`}
+                            style={{ fontSize: "10px" }}
+                          >
+                            {r.required ? "Required" : "Optional"}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <button
+                            className="secondary sm"
+                            onClick={() => onRemoveRule(i)}
+                            style={{
+                              color: "var(--bad)",
+                              borderColor: "rgba(239, 68, 68, 0.3)",
+                              padding: "2px 8px",
+                            }}
+                            title="Remove rule"
+                          >
+                            ✕
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        );
+      })()}
 
       {/* VIEW 2: LINEAGE & FLOW DIAGRAM */}
       {viewMode === "flow" && (

@@ -76,3 +76,4 @@ export default function SidebarNav({ activeTab, onSelectTab, isCollapsed, onTogg
     </aside>
   );
 }
+

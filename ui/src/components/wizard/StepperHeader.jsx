@@ -43,3 +43,4 @@ export default function StepperHeader({ currentStep, onSelectStep, maxUnlockedSt
     </div>
   );
 }
+

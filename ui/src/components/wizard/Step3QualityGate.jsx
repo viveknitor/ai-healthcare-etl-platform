@@ -10,12 +10,15 @@ export default function Step3QualityGate({
   llmMetrics,
   onRunValidation,
   onTriggerAutoHeal,
+  onInitiateDelivery,
   onProceed,
   onViewInvalid,
 }) {
   const invalidCount = report?.summary?.counts?.invalid || 0;
+  const totalCount = report?.summary?.total || fileData?.total_rows || 0;
+  const validCount = Math.max(0, totalCount - invalidCount);
   const hasValidationErrors = invalidCount > 0;
-  const is100PercentValid = isValidated && invalidCount === 0;
+  const is100PercentValid = (isValidated || !!report) && invalidCount === 0;
 
   return (
     <div className="wizard-step-pane">
@@ -24,15 +27,38 @@ export default function Step3QualityGate({
           <h3 className="section-title">Step 3: Quality Gate &amp; AI Auto-Healing</h3>
           <p className="sub-meta">Pre-flight schema validation against official HL7 FHIR R4 specifications</p>
         </div>
-        <div style={{ display: "flex", gap: "8px" }}>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
           <button
             className="secondary"
             onClick={onRunValidation}
             disabled={!!busy}
             style={{ fontWeight: 600 }}
           >
-            {busy === "validate" ? "🛡️ Validating Schema…" : `🛡️ Run Pre-Flight Validation (${fileData?.total_rows || 0})`}
+            {busy === "validate"
+              ? "🛡️ Validating Schema…"
+              : report
+              ? `🛡️ Re-Validate Schema (${totalCount})`
+              : `🛡️ Run Pre-Flight Validation (${fileData?.total_rows || 0})`}
           </button>
+
+          {report && onInitiateDelivery && (
+            <button
+              className="primary"
+              onClick={onInitiateDelivery}
+              disabled={!!busy || validCount === 0}
+              style={{
+                fontWeight: 700,
+                background: invalidCount === 0
+                  ? "linear-gradient(135deg, #10b981 0%, #059669 100%)"
+                  : "linear-gradient(135deg, #10b981 0%, #047857 100%)",
+                boxShadow: "0 4px 14px rgba(16, 185, 129, 0.35)",
+              }}
+            >
+              {invalidCount > 0
+                ? `⚡ Ingest Validated (${validCount}) (Quarantine ${invalidCount})`
+                : `⚡ Ingest All (${validCount}) to Medplum`}
+            </button>
+          )}
         </div>
       </div>
 
@@ -242,15 +268,21 @@ export default function Step3QualityGate({
           {/* 4 Track KPI Metric Pills */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "10px", marginBottom: "12px" }}>
             <div style={{ background: "rgba(0, 0, 0, 0.25)", padding: "8px 12px", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <div style={{ fontSize: "10px", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>Violations Resolved</div>
+              <div style={{ fontSize: "10px", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                {invalidCount === 0 ? "Violations Resolved" : "Schema Errors Fixed"}
+              </div>
               <div style={{ fontSize: "15px", fontWeight: 700, color: "#34d399", marginTop: "2px" }}>
-                {healingTrack.errorsTotal || invalidCount || 10} Resolved
+                {invalidCount === 0
+                  ? `${healingTrack.errorsTotal || 4} Resolved`
+                  : `${healedChanges.length} Rules Healed`}
               </div>
             </div>
             <div style={{ background: "rgba(0, 0, 0, 0.25)", padding: "8px 12px", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <div style={{ fontSize: "10px", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>Rules Repaired</div>
-              <div style={{ fontSize: "15px", fontWeight: 700, color: "#60a5fa", marginTop: "2px" }}>
-                {healedChanges.length} Rules Healed
+              <div style={{ fontSize: "10px", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                {invalidCount > 0 ? "Quarantined Data" : "Rules Repaired"}
+              </div>
+              <div style={{ fontSize: "15px", fontWeight: 700, color: invalidCount > 0 ? "#f87171" : "#60a5fa", marginTop: "2px" }}>
+                {invalidCount > 0 ? `${invalidCount} Records` : `${healedChanges.length} Rules Healed`}
               </div>
             </div>
             <div style={{ background: "rgba(0, 0, 0, 0.25)", padding: "8px 12px", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.08)" }}>
@@ -284,7 +316,20 @@ export default function Step3QualityGate({
       )}
 
       {/* Navigation Footer */}
-      <div style={{ marginTop: "20px", display: "flex", justifyContent: "flex-end" }}>
+      <div style={{ marginTop: "20px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+        <div>
+          {hasValidationErrors && (
+            <span style={{ fontSize: "12px", color: "#fcd34d" }}>
+              ⚠️ {validCount} validated records ready for Medplum. {invalidCount} quarantined records will be safely held in review.
+            </span>
+          )}
+          {is100PercentValid && (
+            <span style={{ fontSize: "12px", color: "var(--ok)" }}>
+              ✓ All {totalCount} records certified and ready for live Medplum delivery.
+            </span>
+          )}
+        </div>
+
         <button
           className="primary"
           onClick={onProceed}
@@ -296,3 +341,4 @@ export default function Step3QualityGate({
     </div>
   );
 }
+

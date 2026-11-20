@@ -56,3 +56,4 @@ export default function AddRecordModal({ isOpen, headers = [], onClose, onSave, 
     </div>
   );
 }
+
