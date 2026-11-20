@@ -1,6 +1,8 @@
 import csv
 import io
 import json
+import xml.etree.ElementTree as ET
+import zipfile
 from dataclasses import asdict
 
 from .connectors.medplum import MedplumClient
@@ -13,8 +15,61 @@ from .validation import validate_fhir
 log = get_logger("upload_pipeline")
 
 
+def _parse_xlsx_bytes(data: bytes) -> list[dict]:
+    """Parse a Microsoft Excel (.xlsx) workbook directly using pure standard library zipfile/XML."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            strings = []
+            if "xl/sharedStrings.xml" in z.namelist():
+                s_tree = ET.fromstring(z.read("xl/sharedStrings.xml"))
+                ns = {"ns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+                for si in s_tree.findall(".//ns:si", ns):
+                    t = si.find(".//ns:t", ns)
+                    strings.append(t.text if t is not None and t.text else "")
+
+            sheet_xml = z.read("xl/worksheets/sheet1.xml")
+            sheet_tree = ET.fromstring(sheet_xml)
+            ns = {"ns": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+
+            rows = []
+            for row in sheet_tree.findall(".//ns:row", ns):
+                row_data = []
+                for c in row.findall("./ns:c", ns):
+                    t_attr = c.get("t")
+                    v_el = c.find("./ns:v", ns)
+                    val = v_el.text if v_el is not None else ""
+                    if t_attr == "s" and val.isdigit():
+                        val = strings[int(val)] if int(val) < len(strings) else val
+                    row_data.append(val)
+                if any(row_data):
+                    rows.append(row_data)
+
+            if not rows:
+                return []
+            headers = [str(h).strip() for h in rows[0]]
+            dict_rows = []
+            for r in rows[1:]:
+                row_dict = {}
+                for i, h in enumerate(headers):
+                    if h:
+                        row_dict[h] = r[i].strip() if i < len(r) and isinstance(r[i], str) else (r[i] if i < len(r) else "")
+                if any(row_dict.values()):
+                    dict_rows.append(row_dict)
+            return dict_rows
+    except Exception as e:
+        log.warning(f"Excel parsing fallback: {e}")
+        return []
+
+
 def parse_uploaded_file(content: str | bytes, filename: str) -> list[dict]:
-    """Parses an uploaded CSV, TSV, or JSON file into a list of row dictionaries."""
+    """Parses an uploaded CSV, TSV, JSON, or Excel (.xlsx) file into a list of row dictionaries."""
+    lower_name = filename.lower()
+
+    # 1. Native Excel (.xlsx) parsing
+    if lower_name.endswith(".xlsx"):
+        raw_bytes = content if isinstance(content, bytes) else content.encode("latin-1")
+        return _parse_xlsx_bytes(raw_bytes)
+
     if isinstance(content, bytes):
         text = content.decode("utf-8-sig", errors="replace")
     else:
@@ -23,8 +78,6 @@ def parse_uploaded_file(content: str | bytes, filename: str) -> list[dict]:
     text = text.strip()
     if not text:
         return []
-
-    lower_name = filename.lower()
 
     # 1. JSON parsing
     if lower_name.endswith(".json") or text.startswith("[") or text.startswith("{"):

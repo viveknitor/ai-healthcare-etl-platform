@@ -19,4 +19,5 @@ class MappingConfig(BaseModel):
     target_resource: str = "Patient"
     status: Literal["draft", "pending_review", "approved"] = "draft"
     constants: dict[str, Any] = Field(default_factory=dict)  # target path -> fixed value
+    metadata: dict[str, Any] = Field(default_factory=dict)   # LLM metrics, tokens, cost, latency
     rules: list[Rule]

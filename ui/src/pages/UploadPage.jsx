@@ -1,6 +1,8 @@
 import { useState, useRef } from "react";
 import { api } from "../api.js";
 import ReconciliationTable from "../components/ReconciliationTable.jsx";
+import AgentWorkflowVisualizer from "../components/AgentWorkflowVisualizer.jsx";
+import MappingContractViewer from "../components/MappingContractViewer.jsx";
 
 const STATUS_CLASS = { delivered: "ok", dry_run: "info", invalid: "warn", failed: "bad" };
 
@@ -79,12 +81,17 @@ export default function UploadPage() {
   const [activeRecord, setActiveRecord] = useState(null);
   const [modalTab, setModalTab] = useState("recon");
   const [copiedKey, setCopiedKey] = useState("");
+  const [isValidated, setIsValidated] = useState(false);
+  const [isDelivered, setIsDelivered] = useState(false);
+  const [llmMetrics, setLlmMetrics] = useState(null);
 
   const handleFileUpload = async (file) => {
     if (!file) return;
     setBusy("upload");
     setError("");
     setReport(null);
+    setIsValidated(false);
+    setIsDelivered(false);
     try {
       const data = await api.uploadFile(file);
       setFileData(data);
@@ -94,6 +101,9 @@ export default function UploadPage() {
         setBusy("suggest");
         const suggested = await api.suggestMapping(data.sample_rows[0], targetResource);
         setMapping(suggested);
+        if (suggested?.metadata?.llm_metrics) {
+          setLlmMetrics(suggested.metadata.llm_metrics);
+        }
       }
     } catch (e) {
       setError(e.message);
@@ -105,6 +115,8 @@ export default function UploadPage() {
   const loadSamplePlanData = async () => {
     setError("");
     setReport(null);
+    setIsValidated(false);
+    setIsDelivered(false);
     const data = {
       filename: "PlanData_dbo_member.csv",
       total_rows: SAMPLE_PLANDATA_ROWS.length,
@@ -118,6 +130,9 @@ export default function UploadPage() {
     try {
       const suggested = await api.suggestMapping(SAMPLE_PLANDATA_ROWS[0], targetResource);
       setMapping(suggested);
+      if (suggested?.metadata?.llm_metrics) {
+        setLlmMetrics(suggested.metadata.llm_metrics);
+      }
     } catch (e) {
       setError(e.message);
     } finally {
@@ -129,9 +144,14 @@ export default function UploadPage() {
     if (!fileData?.sample_rows?.[0]) return;
     setBusy("suggest");
     setError("");
+    setIsValidated(false);
+    setIsDelivered(false);
     try {
       const suggested = await api.suggestMapping(fileData.sample_rows[0], targetResource);
       setMapping(suggested);
+      if (suggested?.metadata?.llm_metrics) {
+        setLlmMetrics(suggested.metadata.llm_metrics);
+      }
     } catch (e) {
       setError(e.message);
     } finally {
@@ -153,22 +173,50 @@ export default function UploadPage() {
   const editRule = (i, field, value) => {
     const rules = mapping.rules.map((r, j) => (j === i ? { ...r, [field]: value } : r));
     setMapping({ ...mapping, status: "pending_review", rules });
+    setIsValidated(false);
+    setIsDelivered(false);
   };
 
   const removeRule = (i) => {
     setMapping({ ...mapping, status: "pending_review", rules: mapping.rules.filter((_, j) => j !== i) });
+    setIsValidated(false);
+    setIsDelivered(false);
   };
 
   const runIngestion = async (dryRun) => {
     if (!fileData?.all_rows || !mapping) return;
+
+    // Quality Gate: Mandatory validation before delivering to Medplum
+    if (!dryRun && !isValidated) {
+      alert("🛡️ Mandatory Quality Gate: Pre-flight validation is required before delivering to Medplum. Running validation now...");
+      setBusy("validating");
+      setError("");
+      try {
+        const valRes = await api.executeUploadIngestion(fileData.all_rows, mapping, true, datasetName);
+        setReport(valRes);
+        const hasErr = (valRes.summary?.counts?.invalid || 0) > 0 || (valRes.summary?.counts?.failed || 0) > 0;
+        if (hasErr) {
+          setError("Validation failed. Please review mapping errors before delivering to Medplum.");
+          setBusy("");
+          return;
+        }
+        setIsValidated(true);
+      } catch (e) {
+        setError(`Validation check failed: ${e.message}`);
+        setBusy("");
+        return;
+      }
+    }
+
     if (
       !dryRun &&
       !window.confirm(
-        `Deliver ${fileData.all_rows.length} records directly to Medplum (${targetResource})? Continue?`
+        `Deliver ${fileData.all_rows.length} validated records directly to Medplum (${targetResource})? Continue?`
       )
     ) {
       return;
     }
+
     setBusy(dryRun ? "validating" : "delivering");
     setError("");
     try {
@@ -179,6 +227,14 @@ export default function UploadPage() {
         datasetName
       );
       setReport(res);
+      if (dryRun) {
+        const hasErr = (res.summary?.counts?.invalid || 0) > 0 || (res.summary?.counts?.failed || 0) > 0;
+        if (!hasErr) {
+          setIsValidated(true);
+        }
+      } else {
+        setIsDelivered(true);
+      }
     } catch (e) {
       setError(e.message);
     } finally {
@@ -192,6 +248,50 @@ export default function UploadPage() {
     setTimeout(() => setCopiedKey(""), 2000);
   };
 
+  const downloadCSVReport = () => {
+    if (!report?.results || report.results.length === 0) return;
+    const rows = report.results.map((r, i) => ({
+      "#": i + 1,
+      "Source Identifier": r.source_id,
+      "Name / Title": r.patient_summary?.title || "—",
+      "Gender": r.patient_summary?.gender || "—",
+      "Birth Date": r.patient_summary?.secondary_value || "—",
+      "Status": r.status === "dry_run" ? "validated" : r.status,
+      "Target Medplum ID": r.target_id || "—",
+      "Medplum URL": r.target_id ? `http://localhost:3000/Patient/${r.target_id}` : "—",
+      "Scoped Identifier": r.mapping_details?.idempotent_identifier || "—",
+      "Errors": (r.errors || []).join(" | "),
+    }));
+    const headers = Object.keys(rows[0]);
+    // Prepend UTF-8 BOM (\uFEFF) so Microsoft Excel opens it directly without character corruption
+    const csvContent =
+      "\uFEFF" +
+      [
+        headers.join(","),
+        ...rows.map((row) =>
+          headers
+            .map((h) => `"${String(row[h] || "").replace(/"/g, '""')}"`)
+            .join(",")
+        ),
+      ].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${datasetName}_Medplum_Ingestion_Report.csv`;
+    link.click();
+  };
+
+  const downloadJSONReport = () => {
+    if (!report) return;
+    const blob = new Blob([JSON.stringify(report, null, 2)], {
+      type: "application/json",
+    });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${datasetName}_Medplum_Ingestion_Bundle.json`;
+    link.click();
+  };
+
   const approved = mapping?.status === "approved";
 
   return (
@@ -202,7 +302,7 @@ export default function UploadPage() {
           <div>
             <h2>📁 Direct Database &amp; File Ingestion (Without HAPI)</h2>
             <p className="sub-meta" style={{ margin: "2px 0 0" }}>
-              Upload arbitrary CSV, TSV, or JSON exports from proprietary databases (e.g. PlanData SQL Server).
+              Upload arbitrary CSV, Excel (.xlsx), TSV, or JSON exports from proprietary databases (e.g. PlanData SQL Server).
               Gemini 3.5 Flash automatically synthesizes and updates the mapping rules dynamically.
             </p>
           </div>
@@ -212,7 +312,17 @@ export default function UploadPage() {
         </div>
       </div>
 
-      {/* 2. File Upload Box & PlanData Sample Loader */}
+      {/* 2. Autonomous Multi-Agent Stepper */}
+      <AgentWorkflowVisualizer
+        llmMetrics={mapping?.metadata?.llm_metrics || llmMetrics}
+        datasetName={datasetName}
+        recordsCount={fileData?.total_rows || 0}
+        approved={approved}
+        validated={isValidated}
+        delivered={isDelivered}
+      />
+
+      {/* 3. File Upload Box & PlanData Sample Loader */}
       <div className="card">
         <div className="row between" style={{ marginTop: 0, marginBottom: "14px" }}>
           <h3 style={{ margin: 0, fontSize: "15px" }}>1. Select or Drop Your Data File</h3>
@@ -237,15 +347,15 @@ export default function UploadPage() {
             type="file"
             ref={fileInputRef}
             onChange={(e) => handleFileUpload(e.target.files?.[0])}
-            accept=".csv,.tsv,.json,.txt"
+            accept=".csv,.tsv,.json,.xlsx,.txt"
             style={{ display: "none" }}
           />
           <div style={{ fontSize: "32px", marginBottom: "8px" }}>📥</div>
           <div style={{ fontWeight: 600, fontSize: "14px" }}>
-            Click to Browse or Drag &amp; Drop CSV, TSV, or JSON File
+            Click to Browse or Drag &amp; Drop CSV, Excel (.xlsx), TSV, or JSON File
           </div>
           <div className="sub-meta" style={{ marginTop: "4px" }}>
-            Supports SQL Server exports, PlanData tables, EHR extracts, or generic healthcare JSON feeds
+            Supports SQL Server exports, Excel spreadsheets (.xlsx), PlanData tables, EHR extracts, or generic healthcare JSON feeds
           </div>
         </div>
 
@@ -319,201 +429,111 @@ export default function UploadPage() {
         const unmappedHeaders = allHeaders.filter((h) => !mappedSources.has(h));
 
         return (
-          <div className="card">
-            <div className="row between" style={{ marginTop: 0, marginBottom: "12px" }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: "15px" }}>
-                  2. AI Synthesized Mapping Contract: <code>{mapping.name}</code>
-                </h3>
-                <p className="sub-meta">
-                  Google Gemini detected column semantics and synthesized FHIR R4 transformation rules automatically.
-                </p>
-              </div>
-              <span className={`chip ${approved ? "ok" : "warn"}`}>
-                {approved ? "✓ Approved" : "Pending Review"}
-              </span>
-            </div>
+          <>
+            <MappingContractViewer
+              mapping={mapping}
+              onEditRule={editRule}
+              onRemoveRule={removeRule}
+              approved={approved}
+              allHeaders={allHeaders}
+              mappedSources={mappedSources}
+              unmappedHeaders={unmappedHeaders}
+              onMapAllRemaining={() => {
+                let extIdx = mapping.rules.filter(
+                  (r) => r.target && r.target.startsWith("extension[")
+                ).length;
+                const newRules = unmappedHeaders.map((col) => ({
+                  source: col,
+                  target: `extension[${extIdx++}].valueString`,
+                  transform: "direct",
+                  confidence: 0.85,
+                  rationale: `Mapped ${col} as custom extension`,
+                }));
+                setMapping({
+                  ...mapping,
+                  status: "pending_review",
+                  rules: [...mapping.rules, ...newRules],
+                });
+                setIsValidated(false);
+                setIsDelivered(false);
+              }}
+              onMapSingleExtension={(col) => {
+                const existingExtCount = mapping.rules.filter(
+                  (r) => r.target && r.target.startsWith("extension[")
+                ).length;
+                const newRule = {
+                  source: col,
+                  target: `extension[${existingExtCount}].valueString`,
+                  transform: "direct",
+                  confidence: 0.85,
+                  rationale: `Mapped ${col} as custom extension`,
+                };
+                setMapping({
+                  ...mapping,
+                  status: "pending_review",
+                  rules: [...mapping.rules, newRule],
+                });
+                setIsValidated(false);
+                setIsDelivered(false);
+              }}
+            />
 
-            {/* Field Coverage Analysis Bar */}
+            {/* Quality Action Gate: Mandatory Validation before Delivery */}
             <div
+              className="card"
               style={{
-                background: "rgba(0,0,0,0.25)",
-                padding: "12px 16px",
-                borderRadius: "var(--radius-md)",
-                marginBottom: "14px",
-                border: "1px solid var(--card-border)",
+                marginTop: "12px",
+                padding: "14px 20px",
+                background: "rgba(15, 23, 42, 0.6)",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
               }}
             >
-              <div className="row between" style={{ margin: 0 }}>
+              <div className="row between" style={{ margin: 0, alignItems: "center" }}>
                 <div>
-                  <strong>Field Coverage Analysis: </strong>
-                  <span style={{ color: "var(--ok)", fontWeight: 700 }}>
-                    {mappedSources.size} Mapped
-                  </span>
-                  {" • "}
-                  <span
-                    style={{
-                      color: unmappedHeaders.length > 0 ? "var(--warn)" : "var(--ok)",
-                      fontWeight: 700,
-                    }}
+                  <button
+                    className={approved ? "secondary" : "primary"}
+                    onClick={approveMapping}
+                    disabled={approved}
                   >
-                    {unmappedHeaders.length} Unmapped / Skipped
+                    {approved ? "✓ Schema Approved & Saved" : "✓ Approve & Save Mapping"}
+                  </button>
+                  <span style={{ marginLeft: "12px", fontSize: "11px", color: "var(--text-muted)" }}>
+                    {approved ? "Quality gate cleared for validation." : "Review and approve contract to unlock validation."}
                   </span>
-                  {" / "}
-                  <span>{allHeaders.length} Total Columns</span>
                 </div>
-                <span className={`chip ${unmappedHeaders.length === 0 ? "ok" : "warn"}`}>
-                  {Math.round((mappedSources.size / Math.max(1, allHeaders.length)) * 100)}% Coverage
-                </span>
-              </div>
 
-              {unmappedHeaders.length > 0 && (
-                <div style={{ marginTop: "8px", fontSize: "12px" }}>
-                  <div className="row between" style={{ margin: "0 0 6px" }}>
-                    <span style={{ color: "var(--text-muted)" }}>
-                      Unmapped / Skipped Columns (Click to add as FHIR Extension):
-                    </span>
-                    <button
-                      className="secondary sm"
-                      style={{ fontSize: "11px", padding: "2px 8px" }}
-                      onClick={() => {
-                        let extIdx = mapping.rules.filter(
-                          (r) => r.target && r.target.startsWith("extension[")
-                        ).length;
-                        const newRules = unmappedHeaders.map((col) => ({
-                          source: col,
-                          target: `extension[${extIdx++}].valueString`,
-                          transform: "direct",
-                          confidence: 0.85,
-                          rationale: `Mapped ${col} as custom extension`,
-                        }));
-                        setMapping({
-                          ...mapping,
-                          status: "pending_review",
-                          rules: [...mapping.rules, ...newRules],
-                        });
-                      }}
-                      title="Automatically map all remaining unmapped columns as FHIR R4 Extensions"
-                    >
-                      ✨ Map All Remaining as Extensions
-                    </button>
-                  </div>
-                  {unmappedHeaders.map((col) => (
-                    <span
-                      key={col}
-                      className="rule-tag"
-                      style={{
-                        cursor: "pointer",
-                        background: "rgba(245, 158, 11, 0.1)",
-                        color: "var(--warn)",
-                        borderColor: "rgba(245, 158, 11, 0.3)",
-                      }}
-                      onClick={() => {
-                        const existingExtCount = mapping.rules.filter(
-                          (r) => r.target && r.target.startsWith("extension[")
-                        ).length;
-                        const newRule = {
-                          source: col,
-                          target: `extension[${existingExtCount}].valueString`,
-                          transform: "direct",
-                          confidence: 0.85,
-                          rationale: `Mapped ${col} as custom extension`,
-                        };
-                        setMapping({
-                          ...mapping,
-                          status: "pending_review",
-                          rules: [...mapping.rules, newRule],
-                        });
-                      }}
-                      title={`Click to map "${col}" as a FHIR Extension`}
-                    >
-                      + {col}
-                    </span>
-                  ))}
+                <div className="row" style={{ margin: 0, gap: "10px", alignItems: "center" }}>
+                  <button
+                    className={`secondary ${isValidated ? "ok" : ""}`}
+                    onClick={() => runIngestion(true)}
+                    disabled={!approved || !!busy}
+                    title="Execute mandatory FHIR schema validation"
+                    style={{ minWidth: "190px" }}
+                  >
+                    {busy === "validating"
+                      ? "Validating Schema…"
+                      : isValidated
+                      ? `✓ Validated (${fileData?.total_rows || 0})`
+                      : `🛡️ Step 1: Validate Schema (${fileData?.total_rows || 0})`}
+                  </button>
+
+                  <button
+                    className={`primary success ${!isValidated ? "disabled-btn" : ""}`}
+                    onClick={() => runIngestion(false)}
+                    disabled={!approved || !!busy}
+                    style={{ minWidth: "210px" }}
+                    title={isValidated ? "Deliver to Medplum" : "Pre-flight validation required before delivery"}
+                  >
+                    {busy === "delivering"
+                      ? "Ingesting to Medplum…"
+                      : !isValidated
+                      ? `⚡ Step 2: Ingest (${fileData?.total_rows || 0})`
+                      : `⚡ Deliver All ${fileData?.total_rows || 0} to Medplum`}
+                  </button>
                 </div>
-              )}
-            </div>
-
-            <table>
-              <thead>
-                <tr>
-                  <th style={{ width: "22%" }}>Source Column</th>
-                  <th style={{ width: "30%" }}>Target FHIR Path</th>
-                  <th style={{ width: "20%" }}>Transform</th>
-                  <th style={{ width: "12%" }}>Confidence</th>
-                  <th style={{ width: "10%", textAlign: "right" }} />
-                </tr>
-              </thead>
-              <tbody>
-                {mapping.rules?.map((r, i) => (
-                  <tr key={i} title={r.rationale || ""}>
-                    <td>
-                      <input
-                        value={r.source}
-                        onChange={(e) => editRule(i, "source", e.target.value)}
-                        style={{ padding: "4px 8px", fontSize: "12px", width: "100%" }}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={r.target}
-                        onChange={(e) => editRule(i, "target", e.target.value)}
-                        style={{ padding: "4px 8px", fontSize: "12px", width: "100%" }}
-                      />
-                    </td>
-                    <td>
-                      <code style={{ fontSize: "11px", color: "var(--brand)" }}>{r.transform}</code>
-                    </td>
-                    <td>
-                      {r.confidence != null && (
-                        <span
-                          className={`chip ${r.confidence >= 0.8 ? "ok" : "warn"}`}
-                          style={{ fontSize: "11px", padding: "1px 6px" }}
-                        >
-                          {Math.round(r.confidence * 100)}%
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      <button className="link" onClick={() => removeRule(i)} style={{ color: "var(--bad)" }}>
-                        ✕
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            <div className="row between" style={{ marginTop: "16px" }}>
-              <button
-                className={approved ? "secondary" : "primary"}
-                onClick={approveMapping}
-                disabled={approved}
-              >
-                {approved ? "✓ Schema Approved & Saved" : "✓ Approve & Save Mapping"}
-              </button>
-
-              <div className="row" style={{ margin: 0, gap: "10px" }}>
-                <button
-                  className="secondary"
-                  onClick={() => runIngestion(true)}
-                  disabled={!approved || !!busy}
-                >
-                  {busy === "validating" ? "Validating…" : `🔍 Run Dry Run (${fileData?.total_rows || 0})`}
-                </button>
-
-                <button
-                  className="primary success"
-                  onClick={() => runIngestion(false)}
-                  disabled={!approved || !!busy}
-                >
-                  {busy === "delivering"
-                    ? "Ingesting to Medplum…"
-                    : `⚡ Ingest All ${fileData?.total_rows || 0} to Medplum`}
-                </button>
               </div>
             </div>
-          </div>
+          </>
         );
       })()}
 
@@ -530,13 +550,28 @@ export default function UploadPage() {
               </p>
             </div>
 
-            <div className="chips" style={{ margin: 0 }}>
+            <div className="chips" style={{ margin: 0, display: "flex", gap: "8px", alignItems: "center" }}>
               <span className="chip">Total: {report.summary?.total}</span>
               {Object.entries(report.summary?.counts || {}).map(([k, v]) => (
                 <span key={k} className={`chip ${STATUS_CLASS[k] || ""}`}>
-                  {k}: {v}
+                  {k === "dry_run" ? "validated" : k}: {v}
                 </span>
               ))}
+              <button
+                className="secondary sm"
+                onClick={downloadCSVReport}
+                title="Download spreadsheet report that opens natively in Microsoft Excel"
+                style={{ marginLeft: "6px" }}
+              >
+                📥 Download Excel CSV
+              </button>
+              <button
+                className="secondary sm"
+                onClick={downloadJSONReport}
+                title="Download complete JSON audit package"
+              >
+                💾 Download JSON
+              </button>
             </div>
           </div>
 

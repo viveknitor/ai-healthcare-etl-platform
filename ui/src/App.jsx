@@ -5,7 +5,7 @@ import MappingPage from "./pages/MappingPage.jsx";
 import UploadPage from "./pages/UploadPage.jsx";
 
 const TABS = [
-  { id: "pipeline", label: "Pipeline & Ingestion", icon: "⚡" },
+  { id: "pipeline", label: "HAPI to Medplum Sync", icon: "🔄" },
   { id: "mapping", label: "AI Mapping Studio", icon: "✨" },
   { id: "upload", label: "Direct File Ingestion", icon: "📁" },
 ];

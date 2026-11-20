@@ -22,6 +22,7 @@ export default function PipelinePage() {
   const [count, setCount] = useState(() => Number(localStorage.getItem(STORAGE_COUNT_KEY)) || 5);
   const [offset, setOffset] = useState(() => Number(localStorage.getItem(STORAGE_OFFSET_KEY)) || 0);
   const [dryRun, setDryRun] = useState(true);
+  const [isValidated, setIsValidated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [activeRecord, setActiveRecord] = useState(null);
@@ -103,32 +104,87 @@ export default function PipelinePage() {
     try {
       const data = await api.runPipeline(Number(count), isDryRun, Number(customOffset), customResType);
       setReport(data);
+      if (isDryRun) {
+        const hasErr = (data?.summary?.counts?.invalid || 0) > 0 || (data?.summary?.counts?.failed || 0) > 0;
+        setIsValidated(!hasErr && (data?.results?.length || 0) > 0);
+      }
     } catch (e) {
       setError(e.message);
+      if (isDryRun) setIsValidated(false);
     } finally {
       setLoading(false);
     }
   }
 
-  function nextBatch(isDryRun = dryRun) {
+  function nextBatch() {
+    setIsValidated(false);
     const newOffset = offset + count;
     setOffset(newOffset);
-    executePipeline(isDryRun, newOffset, resourceType);
+    executePipeline(true, newOffset, resourceType);
   }
 
-  function prevBatch(isDryRun = dryRun) {
+  function prevBatch() {
+    setIsValidated(false);
     const newOffset = Math.max(0, offset - count);
     setOffset(newOffset);
-    executePipeline(isDryRun, newOffset, resourceType);
+    executePipeline(true, newOffset, resourceType);
   }
 
   function clearResults() {
     if (window.confirm("Are you sure you want to clear these results from the UI?")) {
       setReport(null);
+      setIsValidated(false);
       localStorage.removeItem(STORAGE_KEY);
       setActiveRecord(null);
     }
   }
+
+  const downloadCSVReport = () => {
+    if (!report?.results || report.results.length === 0) return;
+    const rows = report.results.map((r, i) => ({
+      "#": offset + i + 1,
+      "Source Resource": resourceType,
+      "Source ID": r.source_id,
+      "Title / Patient Name": r.patient_summary?.title || "—",
+      "Primary Metric / Code": r.patient_summary?.primary_value || r.patient_summary?.code || "—",
+      "Secondary / Date": r.patient_summary?.secondary_value || r.patient_summary?.subtitle || "—",
+      "Status": r.status === "dry_run" ? "validated" : r.status,
+      "Delivery Action": r.mapping_details?.delivery_action || "—",
+      "Target Medplum ID": r.target_id || "—",
+      "Medplum URL": r.target_id ? `http://localhost:3000/${resourceType}/${r.target_id}` : "—",
+      "Idempotent Identifier": r.mapping_details?.idempotent_identifier || `urn:source:hapi|${r.source_id}`,
+      "Subject Link": r.mapping_details?.target_subject_reference || r.patient_summary?.subject_reference || "—",
+      "Errors": (r.errors || []).join(" | "),
+    }));
+    const headers = Object.keys(rows[0]);
+    // Prepend UTF-8 BOM (\uFEFF) so Microsoft Excel opens it directly without character corruption
+    const csvContent =
+      "\uFEFF" +
+      [
+        headers.join(","),
+        ...rows.map((row) =>
+          headers
+            .map((h) => `"${String(row[h] || "").replace(/"/g, '""')}"`)
+            .join(",")
+        ),
+      ].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `HAPI_to_Medplum_${resourceType}_Offset${offset}_Audit.csv`;
+    link.click();
+  };
+
+  const downloadJSONReport = () => {
+    if (!report) return;
+    const blob = new Blob([JSON.stringify(report, null, 2)], {
+      type: "application/json",
+    });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `HAPI_to_Medplum_${resourceType}_Offset${offset}_Bundle.json`;
+    link.click();
+  };
 
   const deliveredCount = report?.summary?.counts?.delivered || 0;
   const totalCount = report?.summary?.total || 0;
@@ -178,16 +234,23 @@ export default function PipelinePage() {
       <div className="card">
         <div className="row between" style={{ marginTop: 0, marginBottom: "16px" }}>
           <div>
-            <h2>Multi-Resource ETL &amp; Ingestion Engine</h2>
+            <h2>🔄 HAPI to Medplum Integration Engine</h2>
             <p className="sub-meta" style={{ margin: "2px 0 0" }}>
-              Automated schema extraction, foreign-key reference remapping, and conditional upsert reconciliation.
+              Automated schema extraction, foreign-key reference remapping, and conditional upsert reconciliation with mandatory quality gates.
             </p>
           </div>
-          {report && (
-            <button className="danger sm" onClick={clearResults}>
-              🗑️ Clear UI Results
-            </button>
-          )}
+          <div className="row" style={{ margin: 0, gap: "8px", alignItems: "center" }}>
+            {isValidated && (
+              <span className="chip ok" style={{ fontSize: "12px", padding: "4px 10px" }}>
+                ✓ Schema Validated
+              </span>
+            )}
+            {report && (
+              <button className="danger sm" onClick={clearResults}>
+                🗑️ Clear UI Results
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Segmented Resource Pills Selector */}
@@ -199,6 +262,7 @@ export default function PipelinePage() {
               onClick={() => {
                 setResourceType(opt.value);
                 setOffset(0);
+                setIsValidated(false);
               }}
             >
               <span>{opt.icon}</span>
@@ -218,7 +282,10 @@ export default function PipelinePage() {
                 min="1"
                 max="100"
                 value={count}
-                onChange={(e) => setCount(Math.max(1, Number(e.target.value)))}
+                onChange={(e) => {
+                  setCount(Math.max(1, Number(e.target.value)));
+                  setIsValidated(false);
+                }}
                 style={{ width: "80px" }}
               />
             </label>
@@ -229,7 +296,10 @@ export default function PipelinePage() {
                 type="number"
                 min="0"
                 value={offset}
-                onChange={(e) => setOffset(Math.max(0, Number(e.target.value)))}
+                onChange={(e) => {
+                  setOffset(Math.max(0, Number(e.target.value)));
+                  setIsValidated(false);
+                }}
                 style={{ width: "90px" }}
                 title="Paginates HAPI to fetch the next consecutive unique records"
               />
@@ -239,7 +309,7 @@ export default function PipelinePage() {
           <div className="row" style={{ margin: 0, gap: "10px", alignItems: "center" }}>
             <button
               className="secondary"
-              onClick={() => prevBatch(dryRun)}
+              onClick={prevBatch}
               disabled={loading || offset <= 0}
               title="Fetch previous batch from source"
             >
@@ -253,28 +323,40 @@ export default function PipelinePage() {
                 executePipeline(true, offset, resourceType);
               }}
               disabled={loading}
-              title="Validate batch against FHIR schema without writing to DB"
-              style={{ minWidth: "160px" }}
+              title="Mandatory step: Validate batch against FHIR schema without writing to DB"
+              style={{ minWidth: "190px", borderColor: isValidated ? "var(--ok)" : undefined }}
             >
-              {loading && dryRun ? "Validating…" : `🔍 Run Dry Run (${count})`}
+              {loading && dryRun ? "Validating…" : `🛡️ Validate & Verify Schema (${count})`}
             </button>
 
             <button
-              className="primary success"
+              className={`primary success ${!isValidated ? "disabled-gate" : ""}`}
               onClick={() => {
+                if (!isValidated) {
+                  alert("Mandatory Quality Gate: You must run 'Validate & Verify Schema' before delivering records to Medplum.");
+                  return;
+                }
                 setDryRun(false);
                 executePipeline(false, offset, resourceType);
               }}
-              disabled={loading}
-              title="Deliver and persist batch into Medplum database"
-              style={{ minWidth: "190px" }}
+              disabled={loading || !isValidated}
+              title={
+                isValidated
+                  ? "Deliver and persist verified batch into Medplum database"
+                  : "Validation Required: Please run 'Validate & Verify Schema' first to unlock delivery."
+              }
+              style={{
+                minWidth: "210px",
+                opacity: !isValidated ? 0.45 : 1,
+                cursor: !isValidated ? "not-allowed" : "pointer",
+              }}
             >
               {loading && !dryRun ? "Delivering…" : `⚡ Deliver to Medplum (${count})`}
             </button>
 
             <button
               className="secondary"
-              onClick={() => nextBatch(dryRun)}
+              onClick={nextBatch}
               disabled={loading}
               title="Advance offset to next batch of unique records"
             >
@@ -289,26 +371,49 @@ export default function PipelinePage() {
       {/* 3. Ingestion & Dynamic Reconciliation Table */}
       {report && (
         <div className="card">
-          <div className="row between" style={{ marginTop: 0, marginBottom: "8px" }}>
+          <div className="row between" style={{ marginTop: 0, marginBottom: "12px", alignItems: "flex-start" }}>
             <div>
-              <h2>
-                Ingestion Results: {resourceType}
-                <span className="chip info" style={{ marginLeft: "10px", fontSize: "12px" }}>
+              <h2 style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", margin: 0 }}>
+                <span>Ingestion Results: {resourceType}</span>
+                <span className="chip info" style={{ fontSize: "12px" }}>
                   Offset {offset} • Records #{offset + 1} to #{offset + (report.results?.length || count)}
                 </span>
+                {report.summary?.counts?.delivered > 0 && (
+                  <span className="chip ok" style={{ fontSize: "12px" }}>
+                    ✓ Persisted to Medplum
+                  </span>
+                )}
               </h2>
-              <p className="sub-meta">
+              <p className="sub-meta" style={{ margin: "4px 0 0" }}>
                 State is persisted across browser refreshes. Click <strong>Inspect</strong> to view field extraction &amp; destination perspective.
               </p>
             </div>
 
-            <div className="chips" style={{ margin: 0 }}>
-              <span className="chip">Total: {report.summary.total}</span>
-              {Object.entries(report.summary.counts).map(([k, v]) => (
-                <span key={k} className={`chip ${STATUS_CLASS[k] || ""}`}>
-                  {k}: {v}
-                </span>
-              ))}
+            <div className="row" style={{ margin: 0, gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+              <button
+                className="secondary sm"
+                onClick={downloadCSVReport}
+                title="Download CSV audit report (Excel-compatible with UTF-8 BOM)"
+                style={{ padding: "6px 12px", fontSize: "12px" }}
+              >
+                📥 Export Audit CSV (Excel)
+              </button>
+              <button
+                className="secondary sm"
+                onClick={downloadJSONReport}
+                title="Download full JSON bundle"
+                style={{ padding: "6px 12px", fontSize: "12px" }}
+              >
+                📥 Export JSON Bundle
+              </button>
+              <div className="chips" style={{ margin: 0 }}>
+                <span className="chip">Total: {report.summary.total}</span>
+                {Object.entries(report.summary.counts).map(([k, v]) => (
+                  <span key={k} className={`chip ${STATUS_CLASS[k] || ""}`}>
+                    {k}: {v}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
 

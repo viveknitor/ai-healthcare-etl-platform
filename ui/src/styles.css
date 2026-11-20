@@ -1034,3 +1034,33 @@ pre {
   color: var(--bad);
   margin: 8px 0;
 }
+
+/* Agent Workflow & Contract Viewer Enhancements */
+.disabled-gate {
+  opacity: 0.45 !important;
+  cursor: not-allowed !important;
+  filter: grayscale(40%);
+  box-shadow: none !important;
+}
+
+.active-pill {
+  background: var(--brand-gradient) !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+  color: #fff !important;
+  font-weight: 600 !important;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
+}
+
+.agent-pulse {
+  animation: agentPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes agentPulse {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(56, 189, 248, 0.7);
+  }
+}
+

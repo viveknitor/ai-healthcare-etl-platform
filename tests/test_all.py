@@ -395,6 +395,88 @@ def test_dynamic_date_transform_handles_sql_server_and_arbitrary_formats():
         assert validate_fhir(res) == []
 
 
+def test_parse_xlsx_bytes_in_upload_pipeline():
+    """Verify standard library zipfile/xml parser parses .xlsx bytes correctly."""
+    import io
+    import zipfile
+    from app.upload_pipeline import _parse_xlsx_bytes
+
+    # Build a minimal valid .xlsx in-memory
+    bio = io.BytesIO()
+    with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
+        # shared strings
+        sst_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            '<si><t>first_name</t></si>'
+            '<si><t>last_name</t></si>'
+            '<si><t>Alice</t></si>'
+            '<si><t>Wonderland</t></si>'
+            '</sst>'
+        )
+        zf.writestr("xl/sharedStrings.xml", sst_xml)
+
+        # sheet1: row 1 (headers: s=0, s=1), row 2 (data: s=2, s=3)
+        sheet_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            '<sheetData>'
+            '<row r="1">'
+            '<c r="A1" t="s"><v>0</v></c>'
+            '<c r="B1" t="s"><v>1</v></c>'
+            '</row>'
+            '<row r="2">'
+            '<c r="A2" t="s"><v>2</v></c>'
+            '<c r="B2" t="s"><v>3</v></c>'
+            '</row>'
+            '</sheetData>'
+            '</worksheet>'
+        )
+        zf.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+
+    records = _parse_xlsx_bytes(bio.getvalue())
+    assert len(records) == 1
+    assert records[0] == {"first_name": "Alice", "last_name": "Wonderland"}
+
+
+def test_llm_metrics_captured_in_suggest():
+    """Verify that suggest_mapping captures usage tokens, latency, and estimated cost."""
+    out = json.dumps({
+        "name": "test_metrics",
+        "target_resource": "Patient",
+        "status": "pending_review",
+        "rules": [{"source": "member_id", "target": "identifier[0].value"}]
+    })
+
+    def mock_handler(req):
+        return httpx.Response(200, json={
+            "candidates": [{"content": {"parts": [{"text": out}], "role": "model"}}],
+            "usageMetadata": {
+                "promptTokenCount": 450,
+                "candidatesTokenCount": 180,
+                "totalTokenCount": 630
+            }
+        })
+
+    cfg = suggest_mapping(
+        {"member_id": "123"},
+        "Patient",
+        api_key="mock",
+        model="gemini-2.5-flash",
+        transport=httpx.MockTransport(mock_handler)
+    )
+
+    assert "llm_metrics" in cfg.metadata
+    metrics = cfg.metadata["llm_metrics"]
+    assert metrics["prompt_tokens"] == 450
+    assert metrics["completion_tokens"] == 180
+    assert metrics["total_tokens"] == 630
+    assert metrics["cost_usd"] > 0
+    assert "cost_formatted" in metrics
+    assert metrics["model"] == "gemini-2.5-flash"
+
+
+
 
 
 

@@ -1,6 +1,7 @@
 """AI mapping agent: PROPOSES a MappingConfig. Output is always 'pending_review' - never auto-run."""
 import json
 import re
+import time
 
 try:
     import truststore
@@ -85,6 +86,9 @@ def suggest_mapping(sample: dict, target_resource: str, *, api_key: str, model: 
 
     last_error = None
     r = None
+    successful_model = model
+    start_time = time.perf_counter()
+
     for attempt_model in models_to_try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{attempt_model}:generateContent"
         try:
@@ -99,6 +103,7 @@ def suggest_mapping(sample: dict, target_resource: str, *, api_key: str, model: 
                     json=payload
                 )
             if r.status_code == 200:
+                successful_model = attempt_model
                 break
             elif r.status_code in (503, 429, 404):
                 last_error = f"{attempt_model} ({r.status_code}): {r.text[:150]}"
@@ -116,6 +121,8 @@ def suggest_mapping(sample: dict, target_resource: str, *, api_key: str, model: 
                 raise
             last_error = str(e)
             continue
+
+    elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
     if r is None or r.status_code != 200:
         raise SuggestError(f"All AI models temporarily unavailable (503/High Demand): {last_error}")
@@ -135,6 +142,29 @@ def suggest_mapping(sample: dict, target_resource: str, *, api_key: str, model: 
         cfg = MappingConfig.model_validate(json.loads(text))
     except Exception as e:  # noqa: BLE001
         raise SuggestError(f"LLM returned an invalid mapping: {e}") from e
+
+    # Extract token metrics and calculate real USD cost
+    usage = data.get("usageMetadata", {})
+    prompt_tokens = usage.get("promptTokenCount", 0)
+    completion_tokens = usage.get("candidatesTokenCount", 0)
+    total_tokens = usage.get("totalTokenCount", prompt_tokens + completion_tokens)
+
+    # Gemini official pricing ($0.075 / 1M prompt, $0.30 / 1M completion for flash; half for flash-lite)
+    if "flash-lite" in successful_model.lower():
+        cost_usd = (prompt_tokens * 0.0000000375) + (completion_tokens * 0.00000015)
+    else:
+        cost_usd = (prompt_tokens * 0.000000075) + (completion_tokens * 0.00000030)
+
+    cfg.metadata["llm_metrics"] = {
+        "model": successful_model,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "cost_usd": round(cost_usd, 6),
+        "cost_formatted": f"${cost_usd:.5f}",
+        "latency_ms": elapsed_ms,
+    }
+
     # Guardrails: model cannot approve its own work, and every source path must exist in the sample.
     cfg.status = "pending_review"
     from .engine import MISSING, get_path
