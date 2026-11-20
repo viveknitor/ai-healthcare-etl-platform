@@ -815,6 +815,23 @@ def test_all_columns_universal_dynamic_coercion():
     assert val_errors == [], f"FHIR validation failed: {val_errors}"
 
 
+def test_swapped_month_day_date_normalization():
+    """Verify that YYYY-DD-MM swapped dates (e.g. 1985-15-06) normalize to valid FHIR YYYY-MM-DD (1985-06-15)."""
+    from app.mapping.engine import normalize_fhir_datetime, _date
+
+    # Direct normalize_fhir_datetime
+    assert normalize_fhir_datetime("1985-15-06", "birthDate") == "1985-06-15"
+    assert normalize_fhir_datetime("2020-31-01", "birthDate") == "2020-01-31"
+
+    # US swapped format DD/MM/YYYY where day > 12
+    assert normalize_fhir_datetime("25/08/1990", "birthDate") == "1990-08-25"
+
+    # Validates against FHIR R4 schema cleanly
+    patient_res = {"resourceType": "Patient", "birthDate": normalize_fhir_datetime("1985-15-06", "birthDate")}
+    errors = validate_fhir(patient_res)
+    assert errors == []
+
+
 def test_upload_pipeline_scenario_reporting_and_quarantine():
     """Verify ingestion pipeline scenario tracking: validated, invalid, quarantined, and delivery actions."""
     from app.upload_pipeline import ingest_uploaded_records

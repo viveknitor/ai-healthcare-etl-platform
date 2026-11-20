@@ -127,11 +127,25 @@ def normalize_fhir_datetime(v: Any, target_path: str = "") -> str:
     date_part = s_clean.split("T")[0].split(" ")[0]
     m_d = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})", date_part)
     if m_d:
-        clean_date = f"{int(m_d.group(1)):04d}-{int(m_d.group(2)):02d}-{int(m_d.group(3)):02d}"
+        y = int(m_d.group(1))
+        m = int(m_d.group(2))
+        d = int(m_d.group(3))
+        # Handle swapped month and day: YYYY-DD-MM (e.g. 1985-15-06 -> m=15, d=6 -> 1985-06-15)
+        if m > 12 and 1 <= d <= 12:
+            m, d = d, m
+        clean_date = f"{y:04d}-{m:02d}-{d:02d}"
     else:
         m_us = re.match(r"^(\d{1,2})[-/](\d{1,2})[-/](\d{4})", date_part)
         if m_us:
-            clean_date = f"{int(m_us.group(3)):04d}-{int(m_us.group(1)):02d}-{int(m_us.group(2)):02d}"
+            p1 = int(m_us.group(1))
+            p2 = int(m_us.group(2))
+            y = int(m_us.group(3))
+            if p1 > 12 and 1 <= p2 <= 12:
+                # DD/MM/YYYY -> p1 is day, p2 is month
+                clean_date = f"{y:04d}-{p2:02d}-{p1:02d}"
+            else:
+                # MM/DD/YYYY -> p1 is month, p2 is day
+                clean_date = f"{y:04d}-{p1:02d}-{p2:02d}"
         else:
             if len(date_part) == 8 and date_part.isdigit():
                 clean_date = f"{date_part[:4]}-{date_part[4:6]}-{date_part[6:8]}"
@@ -183,6 +197,8 @@ def _date(v: Any, args: dict | None = None, target_path: str = "") -> str:
             m = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})", s)
             if m:
                 y, mon, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                if mon > 12 and 1 <= d <= 12:
+                    mon, d = d, mon
                 return f"{y:04d}-{mon:02d}-{d:02d}"
         raise MappingError(f"date {s!r} does not match expected format {from_fmt!r}")
 
