@@ -6,8 +6,8 @@ import UploadPage from "./pages/UploadPage.jsx";
 
 const TABS = [
   { id: "pipeline", label: "HAPI to Medplum Sync", icon: "🔄" },
+  { id: "upload", label: "Direct File Ingestion (QNEXT)", icon: "📁" },
   { id: "mapping", label: "AI Mapping Studio", icon: "✨" },
-  { id: "upload", label: "Direct File Ingestion", icon: "📁" },
 ];
 
 export default function App() {

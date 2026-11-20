@@ -419,9 +419,9 @@ export default function UploadPage() {
       <div className="card">
         <div className="row between" style={{ margin: 0 }}>
           <div>
-            <h2>📁 Direct Database &amp; File Ingestion (Without HAPI)</h2>
+            <h2>📁 Direct Database &amp; File Ingestion (QNEXT)</h2>
             <p className="sub-meta" style={{ margin: "2px 0 0" }}>
-              Upload arbitrary CSV, Excel (.xlsx), TSV, or JSON exports from proprietary databases (e.g. PlanData SQL Server).
+              Upload arbitrary CSV, Excel (.xlsx), TSV, or JSON exports from proprietary databases (QNEXT / PlanData SQL Server).
               Gemini 3.5 Flash automatically synthesizes and updates the mapping rules dynamically.
             </p>
           </div>
