@@ -476,6 +476,37 @@ def test_llm_metrics_captured_in_suggest():
     assert metrics["model"] == "gemini-2.5-flash"
 
 
+def test_dynamic_case_normalization_for_multiplebirthboolean():
+    """Verify that multiplebirthBoolean (lowercase 'b') and string boolean values
+    are automatically normalized to valid FHIR R4 multipleBirthBoolean."""
+    from app.mapping.engine import apply_mapping
+    from app.mapping.models import MappingConfig
+    from app.validation import validate_fhir
+
+    # Simulates an AI mapping with the lowercase typo "multiplebirthBoolean"
+    mapping = MappingConfig(
+        name="test_multiple_birth_resilience",
+        target_resource="Patient",
+        status="approved",
+        rules=[
+            {"source": "id", "target": "identifier[0].value"},
+            {"source": "is_twin", "target": "multiplebirthBoolean"},
+            {"source": "is_dead", "target": "deceasedboolean"},
+        ]
+    )
+
+    row = {"id": "MEM0000031", "is_twin": "False", "is_dead": "false"}
+    res, errors = apply_mapping(mapping, row)
+
+    assert errors == []
+    assert "multipleBirthBoolean" in res
+    assert "multiplebirthBoolean" not in res
+    assert res["multipleBirthBoolean"] is False
+    assert res["deceasedBoolean"] is False
+    assert validate_fhir(res) == []
+
+
+
 
 
 

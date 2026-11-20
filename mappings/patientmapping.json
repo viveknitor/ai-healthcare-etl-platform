@@ -22,12 +22,12 @@
   "metadata": {
     "llm_metrics": {
       "model": "gemini-flash-lite-latest",
-      "prompt_tokens": 1135,
-      "completion_tokens": 1398,
-      "total_tokens": 2533,
-      "cost_usd": 0.000252,
+      "prompt_tokens": 1131,
+      "completion_tokens": 1410,
+      "total_tokens": 2541,
+      "cost_usd": 0.000254,
       "cost_formatted": "$0.00025",
-      "latency_ms": 10006.26
+      "latency_ms": 4626.25
     }
   },
   "rules": [
@@ -38,7 +38,7 @@
       "args": {},
       "required": true,
       "confidence": 1.0,
-      "rationale": "Maps member ID to identifier[0]"
+      "rationale": "Map member ID to identifier[0]"
     },
     {
       "source": "entityid",
@@ -46,8 +46,8 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 0.9,
-      "rationale": "Maps entity ID to identifier[1]"
+      "confidence": 0.95,
+      "rationale": "Map entity ID to identifier[1]"
     },
     {
       "source": "ssn",
@@ -56,7 +56,7 @@
       "args": {},
       "required": false,
       "confidence": 1.0,
-      "rationale": "Maps SSN to identifier[2]"
+      "rationale": "Map SSN to identifier[2]"
     },
     {
       "source": "umin",
@@ -64,8 +64,8 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 0.9,
-      "rationale": "Maps UMIN to identifier[3]"
+      "confidence": 0.95,
+      "rationale": "Map UMIN to identifier[3]"
     },
     {
       "source": "secondaryid",
@@ -73,8 +73,8 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 0.9,
-      "rationale": "Maps secondary ID to identifier[4]"
+      "confidence": 0.95,
+      "rationale": "Map secondary ID to identifier[4]"
     },
     {
       "source": "enterpriseid",
@@ -82,8 +82,8 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 0.9,
-      "rationale": "Maps enterprise ID to identifier[5]"
+      "confidence": 0.95,
+      "rationale": "Map enterprise ID to identifier[5]"
     },
     {
       "source": "ExternalId",
@@ -91,23 +91,17 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 0.9,
-      "rationale": "Maps external ID to identifier[6]"
+      "confidence": 0.95,
+      "rationale": "Map External ID to identifier[6]"
     },
     {
-      "source": "status",
-      "target": "active",
-      "transform": "map",
-      "args": {
-        "Active": true,
-        "A": true,
-        "Inactive": false,
-        "I": false,
-        "default": true
-      },
+      "source": "fullname",
+      "target": "name[0].text",
+      "transform": "direct",
+      "args": {},
       "required": true,
-      "confidence": 0.9,
-      "rationale": "Maps patient status string to boolean active flag"
+      "confidence": 1.0,
+      "rationale": "Map fullname to name[0].text"
     },
     {
       "source": "sex",
@@ -120,16 +114,7 @@
       },
       "required": true,
       "confidence": 1.0,
-      "rationale": "Maps administrative sex code to FHIR gender"
-    },
-    {
-      "source": "fullname",
-      "target": "name[0].text",
-      "transform": "direct",
-      "args": {},
-      "required": true,
-      "confidence": 1.0,
-      "rationale": "Maps full name string to name[0].text"
+      "rationale": "Map sex code to FHIR administrative gender"
     },
     {
       "source": "dob",
@@ -138,7 +123,23 @@
       "args": {},
       "required": true,
       "confidence": 1.0,
-      "rationale": "Maps date of birth timestamp to date"
+      "rationale": "Map dob timestamp to birthDate"
+    },
+    {
+      "source": "status",
+      "target": "active",
+      "transform": "map",
+      "args": {
+        "Active": true,
+        "ACTIVE": true,
+        "A": true,
+        "TERM": false,
+        "Inactive": false,
+        "default": true
+      },
+      "required": true,
+      "confidence": 0.95,
+      "rationale": "Map patient status to active boolean"
     },
     {
       "source": "marital",
@@ -147,7 +148,7 @@
       "args": {},
       "required": false,
       "confidence": 0.9,
-      "rationale": "Maps marital status code"
+      "rationale": "Map marital status code"
     },
     {
       "source": "primarylanguage",
@@ -156,11 +157,11 @@
       "args": {},
       "required": false,
       "confidence": 0.9,
-      "rationale": "Maps primary communication language"
+      "rationale": "Map primary language to communication language coding"
     },
     {
       "source": "multiplebirth",
-      "target": "multipleBirthBoolean",
+      "target": "multiplebirthBoolean",
       "transform": "map",
       "args": {
         "Y": true,
@@ -169,7 +170,7 @@
       },
       "required": false,
       "confidence": 0.9,
-      "rationale": "Maps multiple birth flag to boolean"
+      "rationale": "Map multiple birth flag to boolean"
     },
     {
       "source": "lastupdate",

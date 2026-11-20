@@ -43,13 +43,14 @@ Comprehensive Mapping Guidelines for FHIR R4 Patient:
    - Death Date -> deceasedDateTime (transform "date").
    - Status -> active using transform "map" (e.g. {"ACTIVE": true, "A": true, "TERM": false, "T": false, "default": true}).
    - Marital Status -> maritalStatus.coding[0].code.
-   - Multiple Birth -> multipleBirthBoolean (transform "map" e.g. {"1": true, "0": false}).
+   - Multiple Birth -> multipleBirthBoolean (exact camelCase with capital B; do not use multiplebirthBoolean; transform "map" e.g. {"1": true, "0": false}).
    - Language -> communication[0].language.coding[0].code (or text).
 3. Relationships & Contacts:
    - Guardian / Head of House -> contact[0].name.text, contact[1].name.text.
 4. Healthcare & SDoH Extensions:
    - Ethnicity, Gender Identity, VIP status, Subscriber status, Median Income -> extension[n].valueString, extension[n].valueBoolean, or extension[n].valueDecimal.
 5. Internal Database Audit Columns (e.g. createdate, createid, lastupdate, updateid, externalediting): omit or map only if required.
+FHIR R4 field names are strictly case-sensitive. Always use standard camelCase (e.g. multipleBirthBoolean, birthDate, deceasedBoolean, valueBoolean, valueDecimal).
 Do not invent source fields that do not exist in the sample."""
 
 
@@ -164,6 +165,23 @@ def suggest_mapping(sample: dict, target_resource: str, *, api_key: str, model: 
         "cost_formatted": f"${cost_usd:.5f}",
         "latency_ms": elapsed_ms,
     }
+
+    # Normalize target path tokens to official FHIR R4 camelCase
+    from .engine import _FHIR_FIELD_CASE_MAP
+    for r in cfg.rules:
+        parts = r.target.split(".")
+        new_parts = []
+        for p in parts:
+            clean_p = p.split("[")[0].lower()
+            if clean_p in _FHIR_FIELD_CASE_MAP:
+                canon = _FHIR_FIELD_CASE_MAP[clean_p]
+                if "[" in p:
+                    new_parts.append(canon + p[p.index("["):])
+                else:
+                    new_parts.append(canon)
+            else:
+                new_parts.append(p)
+        r.target = ".".join(new_parts)
 
     # Guardrails: model cannot approve its own work, and every source path must exist in the sample.
     cfg.status = "pending_review"

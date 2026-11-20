@@ -208,15 +208,65 @@ def apply_mapping(cfg: MappingConfig, payload: dict, require_approved: bool = Tr
     return sanitized, errors
 
 
+_FHIR_FIELD_CASE_MAP: dict[str, str] = {
+    # Patient fields with strict FHIR R4 camelCase
+    "multiplebirthboolean": "multipleBirthBoolean",
+    "multiplebirthinteger": "multipleBirthInteger",
+    "multiplebirth": "multipleBirthBoolean",
+    "deceasedboolean": "deceasedBoolean",
+    "deceaseddatetime": "deceasedDateTime",
+    "deceased": "deceasedBoolean",
+    "birthdate": "birthDate",
+    "maritalstatus": "maritalStatus",
+    "generalpractitioner": "generalPractitioner",
+    "managingorganization": "managingOrganization",
+    "resourcetype": "resourceType",
+    # Extension choice values
+    "valuedecimal": "valueDecimal",
+    "valueinteger": "valueInteger",
+    "valuepositiveint": "valuePositiveInt",
+    "valueunsignedint": "valueUnsignedInt",
+    "valueboolean": "valueBoolean",
+    "valuestring": "valueString",
+    "valuedatetime": "valueDateTime",
+    "valuedate": "valueDate",
+    "valuecode": "valueCode",
+    "valueuri": "valueUri",
+    # Observation fields
+    "valuequantity": "valueQuantity",
+    "valuecodeableconcept": "valueCodeableConcept",
+    "effectivedatetime": "effectiveDateTime",
+    "effectiveperiod": "effectivePeriod",
+    # Coding / CodeableConcept fields
+    "userselected": "userSelected",
+}
+
+
 def _sanitize_extensions(node: Any, default_prefix: str = "urn:source:extension") -> Any:
-    """Ensure all FHIR extensions have a non-empty 'url', correct JSON primitive types, and prune empty extensions."""
+    """Ensure all FHIR extensions have a non-empty 'url', correct JSON primitive types,
+    dynamically normalize case-sensitive FHIR field names, and prune empty extensions."""
     if isinstance(node, dict):
+        # 1. Normalize case-sensitive FHIR keys (e.g. multiplebirthBoolean -> multipleBirthBoolean)
+        for k in list(node.keys()):
+            k_lower = k.lower()
+            if k_lower in _FHIR_FIELD_CASE_MAP:
+                canonical_k = _FHIR_FIELD_CASE_MAP[k_lower]
+                if k != canonical_k:
+                    node[canonical_k] = node.pop(k)
+
+        # 2. Sanitize and validate extensions
         if "extension" in node and isinstance(node["extension"], list):
             cleaned = []
             for idx, ext in enumerate(node["extension"]):
                 if isinstance(ext, dict):
                     # Coerce JSON primitive types on extension values
                     for k, v in list(ext.items()):
+                        k_lower = k.lower()
+                        if k_lower in _FHIR_FIELD_CASE_MAP and k != _FHIR_FIELD_CASE_MAP[k_lower]:
+                            canonical_k = _FHIR_FIELD_CASE_MAP[k_lower]
+                            ext[canonical_k] = ext.pop(k)
+                            k = canonical_k
+
                         if k == "valueDecimal" and isinstance(v, str):
                             try:
                                 ext[k] = float(v) if "." in v else int(v)
@@ -227,8 +277,11 @@ def _sanitize_extensions(node: Any, default_prefix: str = "urn:source:extension"
                                 ext[k] = int(float(v))
                             except ValueError:
                                 pass
-                        elif k == "valueBoolean" and isinstance(v, str):
-                            ext[k] = v.lower() in ("true", "1", "yes", "y", "t")
+                        elif k == "valueBoolean":
+                            if isinstance(v, str):
+                                ext[k] = v.lower() in ("true", "1", "yes", "y", "t")
+                            elif not isinstance(v, bool) and v is not None:
+                                ext[k] = bool(v)
 
                     has_val = any(k.startswith("value") or k == "extension" for k in ext.keys())
                     if has_val:
@@ -239,16 +292,21 @@ def _sanitize_extensions(node: Any, default_prefix: str = "urn:source:extension"
                 node["extension"] = cleaned
             else:
                 node.pop("extension", None)
+
+        # 3. Handle non-extension top-level FHIR fields and boolean/integer types
         for k, v in list(node.items()):
             if k != "extension":
-                if k in ("multipleBirthBoolean", "active") and isinstance(v, str):
-                    node[k] = v.lower() in ("true", "1", "yes", "y", "t")
-                elif k in ("multipleBirthInteger",) and isinstance(v, str):
+                if k in ("multipleBirthBoolean", "deceasedBoolean", "active"):
+                    if isinstance(v, str):
+                        node[k] = v.lower() in ("true", "1", "yes", "y", "t")
+                    elif not isinstance(v, bool) and v is not None:
+                        node[k] = bool(v)
+                elif k in ("multipleBirthInteger",) and not isinstance(v, int):
                     try:
                         node[k] = int(float(v))
-                    except ValueError:
+                    except (ValueError, TypeError):
                         pass
-                node[k] = _sanitize_extensions(v, default_prefix)
+                node[k] = _sanitize_extensions(node[k], default_prefix)
     elif isinstance(node, list):
         return [_sanitize_extensions(x, default_prefix) for x in node if x is not None]
     return node
