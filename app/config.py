@@ -31,4 +31,20 @@ class Settings:
 
 
 def get_settings() -> Settings:
-    return Settings()
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(override=True)
+    except ImportError:
+        pass
+    return Settings(
+        hapi_base_url=os.getenv("HAPI_BASE_URL", "https://hapi.fhir.org/baseR4"),
+        medplum_base_url=os.getenv("MEDPLUM_BASE_URL", "http://localhost:8103"),
+        medplum_client_id=os.getenv("MEDPLUM_CLIENT_ID", ""),
+        medplum_client_secret=os.getenv("MEDPLUM_CLIENT_SECRET", ""),
+        gemini_api_key=(
+            os.getenv("GEMINI_API_KEY")
+            or os.getenv("GOOGLE_API_KEY")
+            or os.getenv("ANTHROPIC_API_KEY", "")
+        ),
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest"),
+    )
