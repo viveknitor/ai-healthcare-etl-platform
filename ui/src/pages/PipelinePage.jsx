@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { api } from "../api.js";
 import ReconciliationTable from "../components/ReconciliationTable.jsx";
+import AgentWorkflowVisualizer from "../components/AgentWorkflowVisualizer.jsx";
 
 const STATUS_CLASS = { delivered: "ok", dry_run: "info", invalid: "warn", failed: "bad" };
 const STORAGE_KEY = "healthcare_etl_pipeline_report";
@@ -230,7 +231,16 @@ export default function PipelinePage() {
         </div>
       </div>
 
-      {/* 2. Pipeline Control & Multi-Resource Selector */}
+      {/* 2. Autonomous Multi-Agent Relay */}
+      <AgentWorkflowVisualizer
+        datasetName={`HAPI FHIR R4 (${resourceType})`}
+        recordsCount={count}
+        approved={true}
+        validated={isValidated}
+        delivered={deliveredCount > 0}
+      />
+
+      {/* 3. Pipeline Control & Multi-Resource Selector */}
       <div className="card">
         <div className="row between" style={{ marginTop: 0, marginBottom: "16px" }}>
           <div>
