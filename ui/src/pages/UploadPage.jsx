@@ -373,7 +373,10 @@ export default function UploadPage() {
     }, 1500);
 
     try {
-      const healRes = await api.autoHealMapping(mapping, fileData.sample_rows[0], errors);
+      const invalidRow =
+        currentReport.results.find((r) => r.status === "invalid" && r.source_record)?.source_record ||
+        fileData.sample_rows[0];
+      const healRes = await api.autoHealMapping(mapping, invalidRow, errors);
       clearTimeout(stepTimer1);
       clearTimeout(stepTimer2);
 
@@ -1018,37 +1021,52 @@ export default function UploadPage() {
                     </div>
                   </div>
 
-                  <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-                    <button
-                      className="secondary"
-                      onClick={() => {
-                        setStatusFilter("invalid");
-                        const tbl = document.getElementById("ingestion-results-section");
-                        if (tbl) tbl.scrollIntoView({ behavior: "smooth" });
-                      }}
-                      style={{
-                        background: "rgba(239, 68, 68, 0.2)",
-                        color: "#fca5a5",
-                        borderColor: "rgba(239, 68, 68, 0.5)",
-                        fontSize: "12px",
-                      }}
-                    >
-                      🔍 View Invalid Record ({report.summary?.counts?.invalid || 1})
-                    </button>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>
+                    <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                      <button
+                        className="secondary"
+                        onClick={() => {
+                          setStatusFilter("invalid");
+                          const tbl = document.getElementById("ingestion-results-section");
+                          if (tbl) tbl.scrollIntoView({ behavior: "smooth" });
+                        }}
+                        style={{
+                          background: "rgba(239, 68, 68, 0.2)",
+                          color: "#fca5a5",
+                          borderColor: "rgba(239, 68, 68, 0.5)",
+                          fontSize: "12px",
+                        }}
+                      >
+                        🔍 View Invalid Record ({report.summary?.counts?.invalid || 1})
+                      </button>
 
-                    <button
-                      className="primary"
-                      onClick={() => triggerSelfHeal()}
-                      disabled={!!busy}
-                      style={{
-                        background: "linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)",
-                        borderColor: "rgba(255, 255, 255, 0.3)",
-                        boxShadow: "0 4px 14px rgba(236, 72, 153, 0.4)",
-                        minWidth: "250px",
-                      }}
-                    >
-                      {busy === "healing" ? "🩹 Healing Schema in Progress…" : "🩹 AI Auto-Heal Contract with Gemini"}
-                    </button>
+                      <button
+                        className="primary"
+                        onClick={() => triggerSelfHeal()}
+                        disabled={!!busy}
+                        style={{
+                          background: healedChanges.length > 0
+                            ? "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)"
+                            : "linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)",
+                          borderColor: "rgba(255, 255, 255, 0.3)",
+                          boxShadow: healedChanges.length > 0
+                            ? "0 4px 14px rgba(245, 158, 11, 0.4)"
+                            : "0 4px 14px rgba(236, 72, 153, 0.4)",
+                          minWidth: "250px",
+                        }}
+                      >
+                        {busy === "healing"
+                          ? "🩹 Healing Schema in Progress…"
+                          : healedChanges.length > 0
+                          ? `🔄 Re-Run Auto-Heal on Remaining (${report.summary?.counts?.invalid || 1})`
+                          : "🩹 AI Auto-Heal Contract with Gemini"}
+                      </button>
+                    </div>
+                    {healedChanges.length > 0 && (
+                      <span style={{ fontSize: "11px", color: "#fcd34d", fontWeight: 500 }}>
+                        ⚠️ Notice: Auto-heal ran. Remaining invalid records can be fixed via "✏️ Edit Record" or will be safely quarantined during ingest.
+                      </span>
+                    )}
                   </div>
                 </div>
               )}
@@ -1126,21 +1144,37 @@ export default function UploadPage() {
               {healedChanges.length > 0 && !busy && (
                 <div
                   style={{
-                    background: "linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(59, 130, 246, 0.12) 100%)",
-                    border: "1px solid rgba(16, 185, 129, 0.4)",
+                    background:
+                      (report.summary?.counts?.invalid || 0) === 0
+                        ? "linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(59, 130, 246, 0.12) 100%)"
+                        : "linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(59, 130, 246, 0.12) 100%)",
+                    border:
+                      (report.summary?.counts?.invalid || 0) === 0
+                        ? "1px solid rgba(16, 185, 129, 0.4)"
+                        : "1px solid rgba(245, 158, 11, 0.4)",
                     borderRadius: "var(--radius-md)",
                     padding: "16px 20px",
                     marginTop: "12px",
                   }}
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "12px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, color: "var(--ok)", fontSize: "13px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, color: (report.summary?.counts?.invalid || 0) === 0 ? "var(--ok)" : "#fcd34d", fontSize: "13px" }}>
                       <span>✓ AI Closed-Loop Self-Healing Certified:</span>
-                      <span style={{ fontWeight: 400, color: "#fff" }}>Contract repaired, re-tested & auto-saved</span>
+                      <span style={{ fontWeight: 400, color: "#fff" }}>
+                        {(report.summary?.counts?.invalid || 0) === 0
+                          ? "Contract repaired, re-tested & auto-saved. 100% Quality Gate cleared!"
+                          : `Contract repaired (${healedChanges.length} rules). Valid records ready; ${report.summary?.counts?.invalid} data anomalies quarantined.`}
+                      </span>
                     </div>
-                    <span className="chip ok" style={{ fontSize: "11px", fontWeight: 600 }}>
-                      ✓ 100% Quality Gate Cleared
-                    </span>
+                    {(report.summary?.counts?.invalid || 0) === 0 ? (
+                      <span className="chip ok" style={{ fontSize: "11px", fontWeight: 600 }}>
+                        ✓ 100% Quality Gate Cleared
+                      </span>
+                    ) : (
+                      <span className="chip bad" style={{ fontSize: "11px", fontWeight: 600, background: "rgba(245, 158, 11, 0.2)", borderColor: "#f59e0b", color: "#fcd34d" }}>
+                        ⚠️ Partial Healing: {(report.summary?.total || 0) - (report.summary?.counts?.invalid || 0)} Validated, {report.summary?.counts?.invalid} Quarantined
+                      </span>
+                    )}
                   </div>
 
                   {/* 4 Track KPI Metric Pills */}
