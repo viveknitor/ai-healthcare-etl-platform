@@ -126,6 +126,19 @@ export default function UploadPage() {
     let extIdx = (mapping.rules || []).filter(
       (r) => r.target && r.target.startsWith("extension[")
     ).length;
+
+    // Clean existing rules: if any boolean rule is erroneously set to 'map' without args, convert to 'direct'
+    const cleanedExistingRules = (mapping.rules || []).map((r) => {
+      if (
+        (r.target?.toLowerCase().includes("boolean") || r.target?.toLowerCase().endsWith(".active")) &&
+        r.transform === "map" &&
+        (!r.transform_args || Object.keys(r.transform_args).length === 0)
+      ) {
+        return { ...r, transform: "direct" };
+      }
+      return r;
+    });
+
     const newRules = unmappedHeaders.map((col) => {
       let valType = "valueString";
       const lower = col.toLowerCase();
@@ -149,7 +162,7 @@ export default function UploadPage() {
       return {
         source: col,
         target: `extension[${extIdx++}].${valType}`,
-        transform: valType === "valueBoolean" ? "map" : "direct",
+        transform: "direct",
         confidence: 0.85,
         rationale: `Mapped remaining source column ${col} to FHIR R4 extension`,
         required: false,
@@ -158,7 +171,7 @@ export default function UploadPage() {
     setMapping({
       ...mapping,
       status: "pending_review",
-      rules: [...(mapping.rules || []), ...newRules],
+      rules: [...cleanedExistingRules, ...newRules],
     });
     setIsValidated(false);
     setIsDelivered(false);
@@ -188,7 +201,7 @@ export default function UploadPage() {
     const newRule = {
       source: col,
       target: `extension[${extIdx}].${valType}`,
-      transform: valType === "valueBoolean" ? "map" : "direct",
+      transform: "direct",
       confidence: 0.85,
       rationale: `Mapped source column ${col} to FHIR R4 extension`,
       required: false,
@@ -914,6 +927,7 @@ export default function UploadPage() {
       <EditRecordModal
         editingRow={editingRow}
         editingError={editingError}
+        headers={fileData?.headers || []}
         onClose={() => setEditingRow(null)}
         onSave={handleSaveEdit}
       />
