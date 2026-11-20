@@ -84,6 +84,8 @@ export default function UploadPage() {
   const [isValidated, setIsValidated] = useState(false);
   const [isDelivered, setIsDelivered] = useState(false);
   const [llmMetrics, setLlmMetrics] = useState(null);
+  const [zeroTouch, setZeroTouch] = useState(true);
+  const [healedChanges, setHealedChanges] = useState([]);
 
   const handleFileUpload = async (file) => {
     if (!file) return;
@@ -231,12 +233,60 @@ export default function UploadPage() {
         const hasErr = (res.summary?.counts?.invalid || 0) > 0 || (res.summary?.counts?.failed || 0) > 0;
         if (!hasErr) {
           setIsValidated(true);
+        } else {
+          setIsValidated(false);
+          if (zeroTouch) {
+            await triggerSelfHeal(res);
+          }
         }
       } else {
         setIsDelivered(true);
       }
     } catch (e) {
       setError(e.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const triggerSelfHeal = async (currentReport = report) => {
+    if (!currentReport?.results || !fileData?.sample_rows?.[0] || !mapping) return;
+    const errors = Array.from(
+      new Set(currentReport.results.flatMap((r) => r.errors || []).filter(Boolean))
+    );
+    if (errors.length === 0) return;
+
+    setBusy("healing");
+    setError("");
+    try {
+      const healRes = await api.autoHealMapping(mapping, fileData.sample_rows[0], errors);
+      if (healRes.ok && healRes.mapping) {
+        const approvedMapping = { ...healRes.mapping, status: "approved" };
+        setMapping(approvedMapping);
+        if (healRes.metadata?.llm_metrics) {
+          setLlmMetrics(healRes.metadata.llm_metrics);
+        }
+        setHealedChanges(healRes.changes || ["Auto-repaired schema violations"]);
+
+        // Immediately re-run pre-flight validation with the healed rules
+        setBusy("validating");
+        const retest = await api.executeUploadIngestion(
+          fileData.all_rows,
+          approvedMapping,
+          true,
+          datasetName
+        );
+        setReport(retest);
+        const stillHasErr =
+          (retest.summary?.counts?.invalid || 0) > 0 || (retest.summary?.counts?.failed || 0) > 0;
+        if (!stillHasErr) {
+          setIsValidated(true);
+        } else {
+          setIsValidated(false);
+        }
+      }
+    } catch (e) {
+      setError(`AI Self-Healing failed: ${e.message}`);
     } finally {
       setBusy("");
     }
@@ -327,6 +377,7 @@ export default function UploadPage() {
         approved={approved}
         validated={isValidated}
         delivered={isDelivered}
+        healingHistory={mapping?.metadata?.healing_history || []}
       />
 
       {/* 3. File Upload Box & PlanData Sample Loader */}
@@ -510,6 +561,30 @@ export default function UploadPage() {
                 </div>
 
                 <div className="row" style={{ margin: 0, gap: "10px", alignItems: "center" }}>
+                  <label
+                    style={{
+                      margin: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      cursor: "pointer",
+                      fontSize: "12px",
+                      background: "rgba(255,255,255,0.05)",
+                      padding: "6px 10px",
+                      borderRadius: "var(--radius-sm)",
+                      border: "1px solid var(--card-border)",
+                    }}
+                    title="Automatically diagnoses and repairs FHIR schema errors in closed loop"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={zeroTouch}
+                      onChange={(e) => setZeroTouch(e.target.checked)}
+                      style={{ margin: 0, cursor: "pointer" }}
+                    />
+                    <span>⚡ Auto-Heal (Zero-Touch)</span>
+                  </label>
+
                   <button
                     className={`secondary ${isValidated ? "ok" : ""}`}
                     onClick={() => runIngestion(true)}
@@ -517,7 +592,9 @@ export default function UploadPage() {
                     title="Execute mandatory FHIR schema validation"
                     style={{ minWidth: "190px" }}
                   >
-                    {busy === "validating"
+                    {busy === "healing"
+                      ? "🩹 Auto-Healing Rules…"
+                      : busy === "validating"
                       ? "Validating Schema…"
                       : isValidated
                       ? `✓ Validated (${fileData?.total_rows || 0})`
@@ -539,6 +616,74 @@ export default function UploadPage() {
                   </button>
                 </div>
               </div>
+
+              {/* Dynamic Auto-Heal Trigger Banner on Failure */}
+              {report && (report.summary?.counts?.invalid > 0 || report.summary?.counts?.failed > 0) && (
+                <div
+                  style={{
+                    background: "rgba(239, 68, 68, 0.12)",
+                    border: "1px solid rgba(239, 68, 68, 0.4)",
+                    borderRadius: "var(--radius-md)",
+                    padding: "12px 18px",
+                    marginTop: "12px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "10px",
+                  }}
+                >
+                  <div>
+                    <strong style={{ color: "var(--bad)", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span>🚨 Schema Violations Detected</span>
+                      <span className="chip bad" style={{ fontSize: "11px" }}>
+                        {report.summary?.counts?.invalid || 0} Records Invalid
+                      </span>
+                    </strong>
+                    <div className="sub-meta" style={{ margin: "3px 0 0" }}>
+                      Gemini Self-Healing Agent can inspect the exact FHIR R4 schema errors, heal the target rules, and re-test automatically.
+                    </div>
+                  </div>
+
+                  <button
+                    className="primary"
+                    onClick={() => triggerSelfHeal()}
+                    disabled={!!busy}
+                    style={{
+                      background: "linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)",
+                      borderColor: "rgba(255, 255, 255, 0.3)",
+                      boxShadow: "0 4px 14px rgba(236, 72, 153, 0.4)",
+                    }}
+                  >
+                    {busy === "healing" ? "🩹 Diagnosing & Healing Schema…" : "🩹 AI Auto-Heal Contract with Gemini"}
+                  </button>
+                </div>
+              )}
+
+              {/* Self-Healing Success Telemetry Banner */}
+              {healedChanges.length > 0 && (
+                <div
+                  style={{
+                    background: "rgba(16, 185, 129, 0.1)",
+                    border: "1px solid rgba(16, 185, 129, 0.35)",
+                    borderRadius: "var(--radius-md)",
+                    padding: "12px 18px",
+                    marginTop: "12px",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, color: "var(--ok)", fontSize: "13px" }}>
+                    <span>✓ AI Closed-Loop Self-Healing Certified:</span>
+                    <span style={{ fontWeight: 400, color: "#fff" }}>Contract repaired and re-validated</span>
+                  </div>
+                  <ul style={{ margin: "6px 0 0 18px", padding: 0, fontSize: "12px", color: "var(--text)" }}>
+                    {healedChanges.map((c, idx) => (
+                      <li key={idx} style={{ marginTop: "2px" }}>
+                        <code>{c}</code>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           </>
         );

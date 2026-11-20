@@ -33,4 +33,6 @@ export const api = {
   },
   executeUploadIngestion: (rows, mapping, dry_run, dataset_name = "upload") =>
     call("/upload/execute", { rows, mapping, dry_run, dataset_name }),
+  autoHealMapping: (mapping, sample, errors) =>
+    call("/mappings/auto-heal", { mapping, sample, errors }),
 };

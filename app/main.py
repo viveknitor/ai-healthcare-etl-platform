@@ -6,6 +6,7 @@ from .config import get_settings
 from .connectors.hapi import HapiClient
 from .connectors.medplum import MedplumClient
 from .mapping.engine import MappingNotApproved, apply_mapping
+from .mapping.heal import heal_mapping_config
 from .mapping.models import MappingConfig
 from .mapping.storage import list_mappings, load_mapping, save_mapping
 from .mapping.suggest import SuggestError, suggest_mapping
@@ -28,6 +29,12 @@ class PipelineRequest(BaseModel):
 class SuggestRequest(BaseModel):
     sample: dict
     target_resource: str = "Patient"
+
+
+class HealRequest(BaseModel):
+    mapping: MappingConfig
+    sample: dict
+    errors: list[str]
 
 
 class TransformRequest(BaseModel):
@@ -68,6 +75,29 @@ def suggest(req: SuggestRequest):
         return suggest_mapping(req.sample, req.target_resource, api_key=s.gemini_api_key, model=s.gemini_model)
     except SuggestError as e:
         raise HTTPException(422, str(e))
+
+
+@app.post("/mappings/auto-heal")
+def auto_heal_endpoint(req: HealRequest):
+    s = get_settings()
+    try:
+        healed_cfg, changes = heal_mapping_config(
+            req.mapping,
+            req.sample,
+            req.errors,
+            api_key=s.gemini_api_key,
+            model=s.gemini_model,
+        )
+        return {
+            "ok": True,
+            "mapping": healed_cfg,
+            "changes": changes,
+            "metadata": healed_cfg.metadata,
+        }
+    except SuggestError as e:
+        raise HTTPException(422, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"AI Self-Healing failed: {e}")
 
 
 @app.get("/medplum/live/{resource_type}/{resource_id}")

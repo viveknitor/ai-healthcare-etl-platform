@@ -8,6 +8,7 @@ export default function AgentWorkflowVisualizer({
   approved = false,
   validated = false,
   delivered = false,
+  healingHistory = [],
 }) {
   const [showInfoModal, setShowInfoModal] = useState(false);
 
@@ -112,6 +113,20 @@ export default function AgentWorkflowVisualizer({
 
         {/* Live Active Status Pill */}
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          {healingHistory?.length > 0 && (
+            <span
+              className="chip"
+              style={{
+                background: "linear-gradient(135deg, rgba(168, 85, 247, 0.25) 0%, rgba(236, 72, 153, 0.25) 100%)",
+                color: "#f472b6",
+                border: "1px solid rgba(244, 114, 182, 0.4)",
+                fontSize: "11px",
+              }}
+              title="Autonomous Self-Healing Agent repaired FHIR R4 schema errors"
+            >
+              🩹 Self-Healed ({healingHistory.length} Fix{healingHistory.length > 1 ? "es" : ""})
+            </span>
+          )}
           {llmMetrics && (
             <span
               className="chip"

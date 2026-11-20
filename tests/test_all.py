@@ -506,6 +506,104 @@ def test_dynamic_case_normalization_for_multiplebirthboolean():
     assert validate_fhir(res) == []
 
 
+def test_ai_self_healing_agent_repairs_contract_and_records_telemetry():
+    """Verify that heal_mapping_config captures errors, queries LLM, repairs the rule target,
+    verifies against sample, and stores audit history."""
+    from app.mapping.heal import heal_mapping_config
+    from app.mapping.models import MappingConfig
+
+    failing_mapping = MappingConfig(
+        name="failing_test",
+        target_resource="Patient",
+        status="pending_review",
+        rules=[
+            {"source": "id", "target": "identifier[0].value"},
+            {"source": "is_twin", "target": "multiplebirthBoolean"},  # typo lowercase 'b'
+        ]
+    )
+
+    repaired_llm_json = json.dumps({
+        "name": "failing_test",
+        "target_resource": "Patient",
+        "status": "pending_review",
+        "rules": [
+            {"source": "id", "target": "identifier[0].value", "transform": "direct"},
+            {"source": "is_twin", "target": "multipleBirthBoolean", "transform": "direct", "notes": "Self-healed: fixed casing to multipleBirthBoolean"}
+        ]
+    })
+
+    def mock_heal_transport(req):
+        return httpx.Response(200, json={
+            "candidates": [{"content": {"parts": [{"text": repaired_llm_json}], "role": "model"}}],
+            "usageMetadata": {
+                "promptTokenCount": 520,
+                "candidatesTokenCount": 210,
+                "totalTokenCount": 730
+            }
+        })
+
+    sample_row = {"id": "MEM0000031", "is_twin": False}
+    errors = ["1 validation error for Patient; multiplebirthBoolean; Extra inputs are not permitted"]
+
+    healed_cfg, changes = heal_mapping_config(
+        failing_mapping,
+        sample_row,
+        errors,
+        api_key="mock",
+        model="gemini-2.5-flash",
+        transport=httpx.MockTransport(mock_heal_transport)
+    )
+
+    # Verify rule was healed
+    assert len(healed_cfg.rules) == 2
+    healed_rule = next(r for r in healed_cfg.rules if r.source == "is_twin")
+    assert healed_rule.target == "multipleBirthBoolean"
+    assert any("multipleBirthBoolean" in c for c in changes)
+
+    # Verify healing history telemetry
+    assert "healing_history" in healed_cfg.metadata
+    history = healed_cfg.metadata["healing_history"]
+    assert len(history) == 1
+    assert history[0]["tokens"] == 730
+    assert history[0]["cost_usd"] > 0
+    assert history[0]["model"] == "gemini-2.5-flash"
+
+
+def test_auto_heal_endpoint():
+    """Verify POST /mappings/auto-heal endpoint in FastAPI."""
+    from starlette.testclient import TestClient
+    from app.main import app
+    from unittest.mock import patch
+    from app.mapping.models import MappingConfig
+
+    client = TestClient(app)
+
+    mapping = MappingConfig(
+        name="endpoint_test",
+        target_resource="Patient",
+        status="pending_review",
+        rules=[{"source": "id", "target": "identifier[0].value"}]
+    )
+
+    healed_mapping = mapping.model_copy()
+    healed_mapping.rules[0].target = "identifier[0].value"
+
+    with patch("app.main.heal_mapping_config", return_value=(healed_mapping, ["Healed field"])):
+        resp = client.post(
+            "/mappings/auto-heal",
+            json={
+                "mapping": mapping.model_dump(),
+                "sample": {"id": "1"},
+                "errors": ["some schema error"]
+            }
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["changes"] == ["Healed field"]
+
+
+
 
 
 
