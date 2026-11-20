@@ -1,4 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import AgentLiveFeed from "./AgentLiveFeed.jsx";
+import {
+  buildRunsFromProps,
+  initDemoRuns,
+  advanceSimulator,
+  approveDemoRun,
+} from "./agentSimulator.js";
+
+// Demo mode: ?demo=1 in URL
+const IS_DEMO = new URLSearchParams(window.location.search).get("demo") === "1";
 
 export default function AgentWorkflowVisualizer({
   currentStage = 1,
@@ -9,11 +19,57 @@ export default function AgentWorkflowVisualizer({
   validated = false,
   delivered = false,
   healingHistory = [],
+  onApprove = () => {}, // ← NEW prop (Decision Q8). Default no-op preserves existing callers.
 }) {
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [viewMode, setViewMode] = useState("relay"); // "relay" | "matrix"
 
-  // Compute dynamic stage status
+  // ── Live Run Feed state ───────────────────────────────────────────
+  const [agentRuns, setAgentRuns] = useState(() =>
+    IS_DEMO ? initDemoRuns() : []
+  );
+  const intervalRef = useRef(null);
+
+  // Demo mode: tick the simulator forward while something is running
+  useEffect(() => {
+    if (!IS_DEMO) return;
+    const hasActive = agentRuns.some(
+      (r) => r.status === "running" || r.status === "waiting_human"
+    );
+    if (!hasActive) {
+      clearInterval(intervalRef.current);
+      return;
+    }
+    intervalRef.current = setInterval(() => {
+      setAgentRuns((prev) => advanceSimulator(prev));
+    }, 900); // Decision Q6: only runs while active
+    return () => clearInterval(intervalRef.current);
+  }, [agentRuns]);
+
+  // Real mode: derive runs from props whenever props change
+  useEffect(() => {
+    if (IS_DEMO) return;
+    setAgentRuns(
+      buildRunsFromProps({
+        recordsCount,
+        llmMetrics,
+        approved,
+        validated,
+        delivered,
+        healingHistory,
+      })
+    );
+  }, [recordsCount, llmMetrics, approved, validated, delivered, healingHistory]);
+
+  // Approval handler: wires into both demo and real mode
+  const handleApprove = () => {
+    if (IS_DEMO) {
+      setAgentRuns((prev) => approveDemoRun(prev));
+    }
+    onApprove(); // calls real approveMapping from UploadPage (or no-op from Pipeline)
+  };
+
+  // ── Compute dynamic stage status (unchanged logic from original) ──
   let stage = 1;
   if (delivered) stage = 6;
   else if (validated) stage = 5;
@@ -142,6 +198,13 @@ export default function AgentWorkflowVisualizer({
 
   const hasHealing = healingHistory && healingHistory.length > 0;
 
+  // ── Stepper click → scroll to panel (Decision Q9: do nothing if not found) ─
+  const scrollToPanel = (agentId) => {
+    const el = document.getElementById("feed-panel-" + agentId);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    // If el is null (agent pending, panel not rendered yet) → do nothing
+  };
+
   return (
     <div
       className="card"
@@ -164,6 +227,11 @@ export default function AgentWorkflowVisualizer({
             </h3>
             <p className="sub-meta" style={{ margin: "1px 0 0", fontSize: "11px" }}>
               6 Specialized Agents (+ 1 Self-Healing Sub-Agent) executing end-to-end with strict Human-in-the-Loop oversight.
+              {IS_DEMO && (
+                <span style={{ color: "var(--warn)", marginLeft: "8px", fontWeight: 700 }}>
+                  ● DEMO MODE
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -246,70 +314,65 @@ export default function AgentWorkflowVisualizer({
         </div>
       </div>
 
-      {/* VIEW 1: RELAY VIEW (Interactive Stepper with Explicit Handoff Badges) */}
+      {/* ── VIEW 1: COMPACT RELAY STEPPER ── */}
       {viewMode === "relay" && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(6, 1fr)",
-            gap: "10px",
-            position: "relative",
-          }}
-        >
-          {AGENTS.map((agent) => {
-            const isDone = agent.done;
-            const isActive = agent.active && !isDone;
+        <>
+          <div
+            className="agent-stepper-compact"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(6, 1fr)",
+              gap: "6px",
+              position: "relative",
+            }}
+          >
+            {AGENTS.map((agent) => {
+              const isDone = agent.done;
+              const isActive = agent.active && !isDone;
+              const isPending = !isDone && !isActive;
 
-            return (
-              <div
-                key={agent.id}
-                onClick={() => setSelectedAgent(agent)}
-                style={{
-                  position: "relative",
-                  background: isDone
-                    ? "rgba(16, 185, 129, 0.08)"
-                    : isActive
-                    ? "rgba(59, 130, 246, 0.15)"
-                    : "rgba(0, 0, 0, 0.25)",
-                  border: isDone
-                    ? "1px solid rgba(16, 185, 129, 0.35)"
-                    : isActive
-                    ? "1px solid rgba(59, 130, 246, 0.5)"
-                    : "1px solid rgba(255, 255, 255, 0.06)",
-                  borderRadius: "var(--radius-md)",
-                  padding: "10px",
-                  cursor: "pointer",
-                  transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                }}
-                className={isActive ? "agent-pulse" : ""}
-                title="Click to view Agent Dossier and Handoff Details"
-              >
-                {/* Agent Header */}
-                <div>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      marginBottom: "6px",
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                      <span style={{ fontSize: "18px" }}>{agent.icon}</span>
-                      <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 600 }}>
-                        Agent {agent.num}
+              return (
+                <div
+                  key={agent.id}
+                  onClick={() => scrollToPanel(agent.id)}
+                  style={{
+                    position: "relative",
+                    background: isDone
+                      ? "rgba(16, 185, 129, 0.08)"
+                      : isActive
+                      ? "rgba(59, 130, 246, 0.15)"
+                      : "rgba(0, 0, 0, 0.25)",
+                    border: isDone
+                      ? "1px solid rgba(16, 185, 129, 0.35)"
+                      : isActive
+                      ? "1px solid rgba(59, 130, 246, 0.5)"
+                      : "1px solid rgba(255, 255, 255, 0.06)",
+                    borderRadius: "var(--radius-md)",
+                    padding: "6px 8px",
+                    cursor: "pointer",
+                    transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+                    opacity: isPending ? 0.4 : 1,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "4px",
+                    minHeight: "72px",
+                    justifyContent: "space-between",
+                  }}
+                  title={`Click to jump to ${agent.codename} in the Live Run feed`}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                      <span style={{ fontSize: "14px" }}>{agent.icon}</span>
+                      <span style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 600 }}>
+                        A{agent.num}
                       </span>
                     </div>
-
                     <span
                       style={{
                         fontSize: "9px",
                         fontWeight: 700,
-                        padding: "1px 6px",
-                        borderRadius: "10px",
+                        padding: "1px 5px",
+                        borderRadius: "8px",
                         background: isDone
                           ? "rgba(16, 185, 129, 0.2)"
                           : isActive
@@ -318,16 +381,14 @@ export default function AgentWorkflowVisualizer({
                         color: isDone ? "#34d399" : isActive ? "#93c5fd" : "var(--text-muted)",
                       }}
                     >
-                      {isDone ? "✓ Done" : isActive ? "● Active" : "Pending"}
+                      {isDone ? "✓" : isActive ? "●" : "·"}
                     </span>
                   </div>
-
-                  {/* Agent Codename & Archetype */}
                   <div
                     style={{
-                      fontSize: "12px",
+                      fontSize: "10px",
                       fontWeight: 700,
-                      color: isDone ? "#fff" : isActive ? "#93c5fd" : "#cbd5e1",
+                      color: isDone ? "#fff" : isActive ? "#93c5fd" : "#94a3b8",
                       whiteSpace: "nowrap",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
@@ -337,65 +398,31 @@ export default function AgentWorkflowVisualizer({
                   </div>
                   <div
                     style={{
-                      fontSize: "10px",
+                      fontSize: "9px",
                       color: "var(--brand)",
                       fontWeight: 500,
-                      marginBottom: "6px",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
                     }}
                   >
                     {agent.archetype}
                   </div>
                 </div>
+              );
+            })}
+          </div>
 
-                {/* Handoff Relay Badge */}
-                <div>
-                  <div
-                    style={{
-                      background: "rgba(0,0,0,0.35)",
-                      borderRadius: "var(--radius-sm)",
-                      padding: "4px 6px",
-                      fontSize: "9px",
-                      color: "var(--text-muted)",
-                      lineHeight: "1.2",
-                      border: "1px solid rgba(255,255,255,0.04)",
-                    }}
-                  >
-                    <div style={{ color: "#94a3b8", fontWeight: 600, marginBottom: "2px" }}>
-                      Passes to Next Agent ➔
-                    </div>
-                    <div
-                      style={{
-                        color: isDone ? "#a7f3d0" : "#e2e8f0",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {agent.handoffOutput}
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      marginTop: "6px",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      fontSize: "9px",
-                      color: "var(--text-muted)",
-                    }}
-                  >
-                    <span style={{ fontStyle: "italic" }}>{agent.metrics}</span>
-                    <span style={{ color: "var(--brand)", textDecoration: "underline" }}>Inspect 🔍</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+          {/* ── LIVE RUN FEED (below compact stepper) ── */}
+          <AgentLiveFeed
+            agentRuns={agentRuns}
+            onApprove={handleApprove}
+            onInspect={setSelectedAgent}
+          />
+        </>
       )}
 
-      {/* VIEW 2: FULL AGENT MATRIX TABLE */}
+      {/* ── VIEW 2: FULL AGENT MATRIX TABLE (unchanged) ── */}
       {viewMode === "matrix" && (
         <div style={{ overflowX: "auto" }}>
           <table>
@@ -453,7 +480,7 @@ export default function AgentWorkflowVisualizer({
         </div>
       )}
 
-      {/* AGENT DOSSIER MODAL */}
+      {/* ── AGENT DOSSIER MODAL (unchanged) ── */}
       {selectedAgent && (
         <div className="modal-overlay" onClick={() => setSelectedAgent(null)}>
           <div
@@ -508,7 +535,6 @@ export default function AgentWorkflowVisualizer({
                 marginBottom: "16px",
               }}
             >
-              {/* Input Box */}
               <div
                 style={{
                   background: "rgba(59, 130, 246, 0.08)",
@@ -525,7 +551,6 @@ export default function AgentWorkflowVisualizer({
                 </div>
               </div>
 
-              {/* Output Box */}
               <div
                 style={{
                   background: "rgba(16, 185, 129, 0.08)",

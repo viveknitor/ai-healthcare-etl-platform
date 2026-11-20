@@ -441,6 +441,7 @@ export default function UploadPage() {
         validated={isValidated}
         delivered={isDelivered}
         healingHistory={mapping?.metadata?.healing_history || []}
+        onApprove={approveMapping}
       />
 
       {/* 3. File Upload Box & PlanData Sample Loader */}

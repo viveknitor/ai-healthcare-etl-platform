@@ -242,6 +242,7 @@ export default function PipelinePage() {
         approved={true}
         validated={isValidated}
         delivered={deliveredCount > 0}
+        onApprove={() => {}} // HAPI pipeline has no mapping approval step
       />
 
       {/* 3. Pipeline Control & Multi-Resource Selector */}
