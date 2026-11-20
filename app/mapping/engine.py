@@ -97,6 +97,66 @@ _COMMON_DATE_FORMATS = [
 ]
 
 
+def normalize_fhir_datetime(v: Any, target_path: str = "") -> str:
+    """Dynamically normalizes timestamps and date strings into strictly valid FHIR R4 date/dateTime.
+    FHIR R4 Spec Rules:
+    - Date: YYYY, YYYY-MM, or YYYY-MM-DD (No time component allowed).
+    - DateTime: YYYY, YYYY-MM, YYYY-MM-DD, or YYYY-MM-DDThh:mm:ss(Z|(+|-)hh:mm).
+      If a time component is present, timezone offset (Z or +/-hh:mm) is MANDATORY.
+    - Naive midnight timestamps (e.g. '2026-08-14 00:00:00' or '2026-08-14T00:00:00') from SQL exports
+      are dynamically cleaned to '2026-08-14' (or '2026-08-14T00:00:00Z') to satisfy spec regex.
+    """
+    if v is None or v is MISSING:
+        return ""
+    s = str(v).strip()
+    if not s or s.lower() in SENTINEL_NULLS:
+        return ""
+
+    # Strip sub-second microseconds if needed
+    s_clean = re.sub(r"\.(\d+)", "", s)
+
+    # Check if target is strictly Date-only (e.g. birthDate, valueDate)
+    tgt = target_path.lower()
+    is_date_only = tgt.endswith("date") and not tgt.endswith("datetime")
+
+    # Match time component and timezone offset
+    m_time = re.search(r"[T ](\d{2}):(\d{2}):?(\d{2})?", s_clean)
+    has_tz = bool(re.search(r"(Z|[+-]\d{2}:\d{2})$", s))
+
+    # Extract date part
+    date_part = s_clean.split("T")[0].split(" ")[0]
+    m_d = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})", date_part)
+    if m_d:
+        clean_date = f"{int(m_d.group(1)):04d}-{int(m_d.group(2)):02d}-{int(m_d.group(3)):02d}"
+    else:
+        m_us = re.match(r"^(\d{1,2})[-/](\d{1,2})[-/](\d{4})", date_part)
+        if m_us:
+            clean_date = f"{int(m_us.group(3)):04d}-{int(m_us.group(1)):02d}-{int(m_us.group(2)):02d}"
+        else:
+            if len(date_part) == 8 and date_part.isdigit():
+                clean_date = f"{date_part[:4]}-{date_part[4:6]}-{date_part[6:8]}"
+            else:
+                clean_date = date_part
+
+    if is_date_only or not m_time:
+        return clean_date
+
+    hh, mm = int(m_time.group(1)), int(m_time.group(2))
+    ss = int(m_time.group(3)) if m_time.group(3) else 0
+
+    # If midnight default without explicit timezone (standard SQL Server / DB artifact), return clean date
+    if hh == 0 and mm == 0 and ss == 0 and not has_tz:
+        return clean_date
+
+    # If non-zero time without timezone, enforce UTC 'Z'
+    if not has_tz:
+        return f"{clean_date}T{hh:02d}:{mm:02d}:{ss:02d}Z"
+
+    # Has timezone offset already -> ensure 'T' separator
+    time_part = s[len(date_part) + 1 :]
+    return f"{clean_date}T{time_part}"
+
+
 def _date(v: Any, args: dict | None = None, target_path: str = "") -> str:
     """Robust, dynamic date parser that automatically normalizes SQL Server (with .000 ms),
     ISO, US, compact, and arbitrary date/datetime strings to standard FHIR date format (YYYY-MM-DD)."""
@@ -126,46 +186,8 @@ def _date(v: Any, args: dict | None = None, target_path: str = "") -> str:
                 return f"{y:04d}-{mon:02d}-{d:02d}"
         raise MappingError(f"date {s!r} does not match expected format {from_fmt!r}")
 
-    # No explicit 'from' specified -> fully dynamic detection
-    # 1. Fast regex for ISO / SQL Server timestamps: '1988-04-12 00:00:00.000', '1988-04-12T00:00:00', '1988/04/12'
-    m_iso = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})", s)
-    if m_iso:
-        y, mon, d = int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3))
-        # If target expects a full DateTime (e.g. deceasedDateTime) and timestamp contains time:
-        if "datetime" in target_path.lower() and (" " in s or "T" in s):
-            clean_s = s.replace("Z", "+00:00")
-            try:
-                dt = datetime.fromisoformat(clean_s)
-                return dt.isoformat()
-            except Exception:
-                pass
-        return f"{y:04d}-{mon:02d}-{d:02d}"
-
-    # 2. Fast regex for US format: '04/12/1988 00:00:00' or '04-12-1988'
-    m_us = re.match(r"^(\d{1,2})[-/](\d{1,2})[-/](\d{4})", s)
-    if m_us:
-        mon, d, y = int(m_us.group(1)), int(m_us.group(2)), int(m_us.group(3))
-        return f"{y:04d}-{mon:02d}-{d:02d}"
-
-    # 3. Compact: '19880412'
-    if len(s) == 8 and s.isdigit():
-        return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
-
-    # 4. Standard fromisoformat
-    try:
-        clean_iso = s.replace("Z", "+00:00")
-        return datetime.fromisoformat(clean_iso).strftime(to_fmt)
-    except Exception:
-        pass
-
-    # 5. Formats fallback
-    for fmt in _COMMON_DATE_FORMATS:
-        try:
-            return datetime.strptime(s, fmt).strftime(to_fmt)
-        except Exception:
-            pass
-
-    raise MappingError(f"cannot parse date {s!r}")
+    # Fully dynamic detection and normalization
+    return normalize_fhir_datetime(s, target_path)
 
 
 def _map(v: Any, args: dict) -> Any:
@@ -366,13 +388,10 @@ def _coerce_for_target(target: str, val: Any) -> Any:
     if tgt.split(".")[-1] == "gender":
         return _parse_gender_dynamic(val)
 
-    # Date normalization for birthDate
-    if tgt.split(".")[-1] == "birthdate" and isinstance(val, str) and len(val) > 10:
-        m = re.match(r"^(\d{4}[-/]\d{1,2}[-/]\d{1,2})", val)
-        if m:
-            clean = m.group(1).replace("/", "-")
-            parts = clean.split("-")
-            return f"{int(parts[0]):04d}-{int(parts[1]):02d}-{int(parts[2]):02d}"
+    # Date and DateTime normalization (e.g. deceasedDateTime, birthDate, effectiveDateTime, valueDateTime)
+    tgt_tail = tgt.split(".")[-1]
+    if "datetime" in tgt_tail or "date" in tgt_tail:
+        return normalize_fhir_datetime(val, target)
 
     return val
 
@@ -532,6 +551,8 @@ def _sanitize_extensions(node: Any, default_prefix: str = "urn:source:extension"
                                     ext["valueString"] = str(v)
                         elif k == "valueBoolean":
                             ext[k] = _parse_bool_dynamic(v)
+                        elif k in ("valueDateTime", "valueDate"):
+                            ext[k] = normalize_fhir_datetime(v, k)
 
                     has_val = any(k.startswith("value") or k == "extension" for k in ext.keys())
                     if has_val:
@@ -548,6 +569,8 @@ def _sanitize_extensions(node: Any, default_prefix: str = "urn:source:extension"
             if k != "extension":
                 if k in ("multipleBirthBoolean", "deceasedBoolean", "active"):
                     node[k] = _parse_bool_dynamic(v)
+                elif k in ("deceasedDateTime", "birthDate", "effectiveDateTime"):
+                    node[k] = normalize_fhir_datetime(v, k)
                 elif k in ("multipleBirthInteger",):
                     try:
                         node[k] = _parse_number_dynamic(v, is_int=True)

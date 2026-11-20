@@ -15,19 +15,17 @@
     "identifier[4].system": "http://hospital.smarthealth.org/secondaryid",
     "identifier[4].type.text": "Secondary ID",
     "identifier[5].system": "http://hospital.smarthealth.org/enterpriseid",
-    "identifier[5].type.text": "Enterprise ID",
-    "identifier[6].system": "http://hospital.smarthealth.org/externalid",
-    "identifier[6].type.text": "External ID"
+    "identifier[5].type.text": "Enterprise ID"
   },
   "metadata": {
     "llm_metrics": {
       "model": "gemini-flash-lite-latest",
-      "prompt_tokens": 1188,
-      "completion_tokens": 1438,
-      "total_tokens": 2626,
-      "cost_usd": 0.00026,
-      "cost_formatted": "$0.00026",
-      "latency_ms": 3754.18
+      "prompt_tokens": 1141,
+      "completion_tokens": 1386,
+      "total_tokens": 2527,
+      "cost_usd": 0.000251,
+      "cost_formatted": "$0.00025",
+      "latency_ms": 4254.44
     }
   },
   "rules": [
@@ -38,7 +36,7 @@
       "args": {},
       "required": true,
       "confidence": 1.0,
-      "rationale": "Maps member ID to the first identifier slot"
+      "rationale": "Maps member identifier to FHIR Patient.identifier"
     },
     {
       "source": "entityid",
@@ -47,7 +45,7 @@
       "args": {},
       "required": false,
       "confidence": 0.9,
-      "rationale": "Maps entity ID to the second identifier slot"
+      "rationale": "Maps entity identifier to FHIR Patient.identifier"
     },
     {
       "source": "ssn",
@@ -55,8 +53,8 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 0.95,
-      "rationale": "Maps Social Security Number"
+      "confidence": 1.0,
+      "rationale": "Maps Social Security Number to FHIR Patient.identifier"
     },
     {
       "source": "umin",
@@ -65,7 +63,7 @@
       "args": {},
       "required": false,
       "confidence": 0.9,
-      "rationale": "Maps UMIN identifier"
+      "rationale": "Maps UMIN to FHIR Patient.identifier"
     },
     {
       "source": "secondaryid",
@@ -74,7 +72,7 @@
       "args": {},
       "required": false,
       "confidence": 0.9,
-      "rationale": "Maps secondary ID"
+      "rationale": "Maps secondary identifier to FHIR Patient.identifier"
     },
     {
       "source": "enterpriseid",
@@ -83,16 +81,7 @@
       "args": {},
       "required": false,
       "confidence": 0.9,
-      "rationale": "Maps enterprise ID"
-    },
-    {
-      "source": "ExternalId",
-      "target": "identifier[6].value",
-      "transform": "direct",
-      "args": {},
-      "required": false,
-      "confidence": 0.9,
-      "rationale": "Maps external ID"
+      "rationale": "Maps enterprise identifier to FHIR Patient.identifier"
     },
     {
       "source": "status",
@@ -103,9 +92,9 @@
         "Inactive": false,
         "default": true
       },
-      "required": true,
+      "required": false,
       "confidence": 0.9,
-      "rationale": "Maps string status to FHIR active boolean"
+      "rationale": "Maps active status to FHIR Patient.active boolean"
     },
     {
       "source": "sex",
@@ -116,27 +105,36 @@
         "F": "female",
         "default": "unknown"
       },
-      "required": true,
+      "required": false,
       "confidence": 1.0,
-      "rationale": "Maps administrative sex code to FHIR gender"
+      "rationale": "Maps administrative sex to FHIR Patient.gender"
     },
     {
       "source": "fullname",
       "target": "name[0].text",
       "transform": "direct",
       "args": {},
-      "required": true,
+      "required": false,
       "confidence": 1.0,
-      "rationale": "Maps full name text"
+      "rationale": "Maps full name to FHIR Patient.name[0].text"
     },
     {
       "source": "dob",
       "target": "birthDate",
       "transform": "date",
       "args": {},
-      "required": true,
+      "required": false,
       "confidence": 1.0,
-      "rationale": "Maps date of birth"
+      "rationale": "Maps date of birth to FHIR Patient.birthDate"
+    },
+    {
+      "source": "deathdate",
+      "target": "deceasedDateTime",
+      "transform": "date",
+      "args": {},
+      "required": false,
+      "confidence": 1.0,
+      "rationale": "Maps death date to FHIR Patient.deceasedDateTime"
     },
     {
       "source": "marital",
@@ -145,7 +143,7 @@
       "args": {},
       "required": false,
       "confidence": 0.9,
-      "rationale": "Maps marital status code"
+      "rationale": "Maps marital status code to FHIR Patient.maritalStatus"
     },
     {
       "source": "multiplebirth",
@@ -158,16 +156,7 @@
       },
       "required": false,
       "confidence": 0.9,
-      "rationale": "Maps multiple birth indicator to multipleBirthBoolean"
-    },
-    {
-      "source": "primarylanguage",
-      "target": "communication[0].language.coding[0].code",
-      "transform": "direct",
-      "args": {},
-      "required": false,
-      "confidence": 0.9,
-      "rationale": "Maps primary communication language"
+      "rationale": "Maps multiple birth indicator to FHIR Patient.multipleBirthBoolean"
     },
     {
       "source": "medincome",
@@ -175,8 +164,8 @@
       "transform": "direct",
       "args": {},
       "required": false,
-      "confidence": 0.85,
-      "rationale": "Maps median income to SDoH extension"
+      "confidence": 0.8,
+      "rationale": "Maps median income SDoH attribute to extension valueDecimal"
     },
     {
       "source": "lastupdate",
@@ -224,13 +213,13 @@
       "rationale": "Mapped obs_ethnicid as custom extension"
     },
     {
-      "source": "deathdate",
+      "source": "primarylanguage",
       "target": "extension[6].valueString",
       "transform": "direct",
       "args": {},
       "required": false,
       "confidence": 0.85,
-      "rationale": "Mapped deathdate as custom extension"
+      "rationale": "Mapped primarylanguage as custom extension"
     },
     {
       "source": "createid",
@@ -287,8 +276,17 @@
       "rationale": "Mapped EligibilityOfficeId as custom extension"
     },
     {
-      "source": "GenderIdentityId",
+      "source": "ExternalId",
       "target": "extension[13].valueString",
+      "transform": "direct",
+      "args": {},
+      "required": false,
+      "confidence": 0.85,
+      "rationale": "Mapped ExternalId as custom extension"
+    },
+    {
+      "source": "GenderIdentityId",
+      "target": "extension[14].valueString",
       "transform": "direct",
       "args": {},
       "required": false,

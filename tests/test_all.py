@@ -721,6 +721,39 @@ def test_sentinel_null_on_required_field_raises_error():
         assert "missing required source field 'memid'" in errors[0]
 
 
+def test_deceased_datetime_dynamic_normalization():
+    """Verify that deceasedDateTime values like '2026-08-14T00:00:00' or '2026-08-14 00:00:00.000'
+    are dynamically normalized to satisfy FHIR R4 DateTime spec regex, preventing Pydantic validation crashes."""
+    from app.mapping.engine import apply_mapping
+    from app.mapping.models import MappingConfig
+    from app.validation import validate_fhir
+
+    mapping = MappingConfig(
+        name="test_death_date",
+        target_resource="Patient",
+        status="approved",
+        rules=[
+            {"source": "id", "target": "identifier[0].value"},
+            {"source": "death_date", "target": "deceasedDateTime", "transform": "direct"},
+        ]
+    )
+
+    test_inputs = [
+        "2026-08-14T00:00:00",
+        "2026-08-14 00:00:00.000",
+        "2026-08-14 00:00:00",
+        "2026-08-14",
+        "08/14/2026",
+    ]
+
+    for val in test_inputs:
+        res, errors = apply_mapping(mapping, {"id": "MEM001", "death_date": val})
+        assert errors == [], f"Unexpected mapping error for {val}: {errors}"
+        val_errors = validate_fhir(res)
+        assert val_errors == [], f"FHIR validation failed for {val}: {val_errors}"
+
+
+
 
 
 
