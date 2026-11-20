@@ -84,7 +84,6 @@ export default function UploadPage() {
   const [isValidated, setIsValidated] = useState(false);
   const [isDelivered, setIsDelivered] = useState(false);
   const [llmMetrics, setLlmMetrics] = useState(null);
-  const [zeroTouch, setZeroTouch] = useState(true);
   const [healedChanges, setHealedChanges] = useState([]);
 
   const handleFileUpload = async (file) => {
@@ -235,9 +234,6 @@ export default function UploadPage() {
           setIsValidated(true);
         } else {
           setIsValidated(false);
-          if (zeroTouch) {
-            await triggerSelfHeal(res);
-          }
         }
       } else {
         setIsDelivered(true);
@@ -561,30 +557,6 @@ export default function UploadPage() {
                 </div>
 
                 <div className="row" style={{ margin: 0, gap: "10px", alignItems: "center" }}>
-                  <label
-                    style={{
-                      margin: 0,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      cursor: "pointer",
-                      fontSize: "12px",
-                      background: "rgba(255,255,255,0.05)",
-                      padding: "6px 10px",
-                      borderRadius: "var(--radius-sm)",
-                      border: "1px solid var(--card-border)",
-                    }}
-                    title="Automatically diagnoses and repairs FHIR schema errors in closed loop"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={zeroTouch}
-                      onChange={(e) => setZeroTouch(e.target.checked)}
-                      style={{ margin: 0, cursor: "pointer" }}
-                    />
-                    <span>⚡ Auto-Heal (Zero-Touch)</span>
-                  </label>
-
                   <button
                     className={`secondary ${isValidated ? "ok" : ""}`}
                     onClick={() => runIngestion(true)}

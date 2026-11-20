@@ -241,3 +241,4 @@ def heal_mapping_config(
         raise SuggestError(f"AI Self-Healing referenced unknown source fields: {bad}")
 
     return healed_cfg, changes
+
