@@ -561,22 +561,88 @@ export default function UploadPage() {
     }
   };
 
-  const downloadCSVReport = () => {
+  const downloadReport = (type = "full") => {
     if (!report?.results || report.results.length === 0) return;
 
-    // Merge all original source input columns (all 27+ fields) with ETL execution & Medplum linkage columns
-    const rows = report.results.map((r, i) => {
-      const srcRecord = r.source_record || fileData?.all_rows?.[i] || {};
-      return {
-        "#": i + 1,
-        "ETL Status": r.status === "dry_run" ? "validated" : r.status,
-        "Target Medplum ID": r.target_id || "—",
-        "Medplum URL": r.target_id ? `http://localhost:3000/Patient/${r.target_id}` : "—",
-        "Scoped Identifier": r.mapping_details?.idempotent_identifier || "—",
-        ...srcRecord,
-        "ETL Errors": (r.errors || []).join(" | "),
-      };
-    });
+    let targetResults = report.results;
+    let filenameSuffix = "Full_Audit_Report.csv";
+
+    if (type === "quarantine") {
+      targetResults = report.results.filter(
+        (r) => r.status === "invalid" || r.status === "failed"
+      );
+      filenameSuffix = "Quarantine_Exceptions.csv";
+      if (targetResults.length === 0) {
+        alert("No quarantined or invalid records found in this batch!");
+        return;
+      }
+    } else if (type === "manifest") {
+      targetResults = report.results.filter((r) => r.status === "delivered");
+      filenameSuffix = "Delivery_Manifest.csv";
+      if (targetResults.length === 0) {
+        alert("No delivered records yet. Deliver records first to export the delivery manifest.");
+        return;
+      }
+    }
+
+    let rows = [];
+
+    if (type === "quarantine") {
+      rows = targetResults.map((r, i) => {
+        const origIdx = report.results.indexOf(r);
+        const srcRecord = r.source_record || fileData?.all_rows?.[origIdx] || {};
+        return {
+          "#": i + 1,
+          "Original Row": origIdx + 1,
+          "Error Classification":
+            r.mapping_details?.error_category ||
+            (r.status === "failed" ? "API Delivery Failure" : "FHIR R4 Schema Violation"),
+          "Source Identifier": r.source_id,
+          "Violations / Errors": (r.errors || []).join(" | "),
+          "Remediation Guidance": (r.errors || []).some((e) => e.includes("deceasedDateTime"))
+            ? "Format datetime to ISO 8601 or YYYY-MM-DD or use AI Auto-Heal"
+            : (r.errors || []).some((e) => e.includes("transform"))
+            ? "Auto-heal mapping transforms or edit source record"
+            : "Review field values against FHIR R4 schema constraints or use Edit Record",
+          ...srcRecord,
+        };
+      });
+    } else if (type === "manifest") {
+      rows = targetResults.map((r, i) => {
+        const origIdx = report.results.indexOf(r);
+        const srcRecord = r.source_record || fileData?.all_rows?.[origIdx] || {};
+        const action = r.mapping_details?.delivery_action || "created";
+        return {
+          "#": i + 1,
+          "Medplum Resource ID": r.target_id || "—",
+          "Medplum Portal URL": r.target_id ? `http://localhost:3000/${targetResource}/${r.target_id}` : "—",
+          "Delivery Action": action === "created" ? "Created (New Resource)" : "Updated (Idempotent Match)",
+          "Source Identifier": r.source_id,
+          "Patient Name": r.patient_summary?.title || "—",
+          "Demographics": r.patient_summary?.subtitle || "—",
+          "Scoped Identifier": r.mapping_details?.idempotent_identifier || "—",
+          "Delivery Timestamp": new Date().toISOString(),
+          ...srcRecord,
+        };
+      });
+    } else {
+      // Full audit report (all records)
+      rows = targetResults.map((r, i) => {
+        const origIdx = report.results.indexOf(r);
+        const srcRecord = r.source_record || fileData?.all_rows?.[origIdx] || {};
+        const action = r.mapping_details?.delivery_action || (r.status === "delivered" ? "delivered" : r.status);
+        return {
+          "#": i + 1,
+          "ETL Status": r.status === "dry_run" ? "validated" : r.status,
+          "Delivery Scenario": action,
+          "Target Medplum ID": r.target_id || "—",
+          "Medplum URL": r.target_id ? `http://localhost:3000/${targetResource}/${r.target_id}` : "—",
+          "Scoped Identifier": r.mapping_details?.idempotent_identifier || "—",
+          ...srcRecord,
+          "ETL Errors": (r.errors || []).join(" | "),
+        };
+      });
+    }
 
     // Collect all distinct headers preserving all 27+ original input columns
     const headerSet = new Set();
@@ -597,7 +663,7 @@ export default function UploadPage() {
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `${datasetName}_Medplum_Full_Audit_Report.csv`;
+    link.download = `${datasetName}_${filenameSuffix}`;
     link.click();
   };
 
@@ -612,10 +678,32 @@ export default function UploadPage() {
     link.click();
   };
 
+  const scenarioCounts = {
+    ALL: report?.results?.length || 0,
+    delivered: (report?.results || []).filter((r) => r.status === "delivered").length,
+    created: (report?.results || []).filter((r) => r.status === "delivered" && r.mapping_details?.delivery_action === "created").length,
+    updated: (report?.results || []).filter((r) => r.status === "delivered" && r.mapping_details?.delivery_action === "updated").length,
+    validated: (report?.results || []).filter((r) => r.status === "dry_run" || r.status === "validated").length,
+    invalid: (report?.results || []).filter((r) => r.status === "invalid").length,
+    failed: (report?.results || []).filter((r) => r.status === "failed").length,
+  };
+
   const filteredResults = (report?.results || []).filter((r) => {
     if (statusFilter !== "ALL") {
       const actualStatus = r.status === "dry_run" ? "validated" : r.status;
-      if (actualStatus !== statusFilter && r.status !== statusFilter) return false;
+      const deliveryAction = r.mapping_details?.delivery_action;
+
+      if (statusFilter === "created") {
+        if (actualStatus !== "delivered" || deliveryAction !== "created") return false;
+      } else if (statusFilter === "updated") {
+        if (actualStatus !== "delivered" || deliveryAction !== "updated") return false;
+      } else if (statusFilter === "quarantined" || statusFilter === "invalid") {
+        if (actualStatus !== "invalid" && r.status !== "invalid") return false;
+      } else if (statusFilter === "validated" || statusFilter === "dry_run") {
+        if (actualStatus !== "validated" && r.status !== "dry_run") return false;
+      } else if (actualStatus !== statusFilter && r.status !== statusFilter) {
+        return false;
+      }
     }
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
@@ -1172,48 +1260,112 @@ export default function UploadPage() {
             </div>
           )}
 
-          <div id="ingestion-results-section" className="row between" style={{ marginTop: 0, marginBottom: "12px" }}>
-            <div>
-              <h2>Ingestion Results: {fileData?.filename}</h2>
-              <p className="sub-meta">
-                Streamed {report.results?.length || 0} of {report.summary?.total} records using mapping <code>{mapping?.name}</code>.
-              </p>
+          <div id="ingestion-results-section" style={{ marginTop: 0, marginBottom: "16px" }}>
+            <div className="row between" style={{ alignItems: "flex-start", marginBottom: "12px" }}>
+              <div>
+                <h2 style={{ margin: 0 }}>Ingestion Results: {fileData?.filename}</h2>
+                <p className="sub-meta" style={{ marginTop: "4px" }}>
+                  Streamed {report.results?.length || 0} of {report.summary?.total} records using mapping <code>{mapping?.name}</code>.
+                </p>
+              </div>
+
+              <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                <button
+                  className="primary sm"
+                  onClick={handleStartAddRecord}
+                  title="Add a new record to this batch"
+                >
+                  ➕ Add Record
+                </button>
+              </div>
             </div>
 
-            <div className="chips" style={{ margin: 0, display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-              <span className="chip">Total: {report.summary?.total}</span>
-              {Object.entries(report.summary?.counts || {}).map(([k, v]) => (
-                <span key={k} className={`chip ${STATUS_CLASS[k] || ""}`}>
-                  {k === "dry_run" ? "validated" : k}: {v}
-                </span>
-              ))}
-              <button
-                className="secondary sm"
-                onClick={downloadCSVReport}
-                title="Download spreadsheet report that opens natively in Microsoft Excel"
-                style={{ marginLeft: "6px" }}
-              >
-                📥 Download Excel CSV
-              </button>
-              <button
-                className="secondary sm"
-                onClick={downloadJSONReport}
-                title="Download complete JSON audit package"
-              >
-                💾 Download JSON
-              </button>
-              <button
-                className="primary sm"
-                onClick={handleStartAddRecord}
-                title="Add a new record to this batch"
-                style={{ marginLeft: "4px" }}
-              >
-                ➕ Add Record
-              </button>
+            {/* Scenario Metrics & Download Hub Banner */}
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "12px",
+                padding: "12px 16px",
+                background: "rgba(15, 23, 42, 0.65)",
+                border: "1px solid var(--card-border)",
+                borderRadius: "var(--radius-md)",
+                marginBottom: "12px",
+              }}
+            >
+              {/* Scenario KPI Badges */}
+              <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                <span className="chip" style={{ fontWeight: 600 }}>Total: {report.summary?.total || 0}</span>
+                {scenarioCounts.delivered > 0 && (
+                  <span className="chip ok" title={`${scenarioCounts.created} Created, ${scenarioCounts.updated} Updated`}>
+                    ✓ Delivered: {scenarioCounts.delivered}
+                    {scenarioCounts.created > 0 && <span style={{ opacity: 0.85, fontSize: "11px", marginLeft: "4px" }}>({scenarioCounts.created} created)</span>}
+                    {scenarioCounts.updated > 0 && <span style={{ opacity: 0.85, fontSize: "11px", marginLeft: "4px" }}>({scenarioCounts.updated} updated)</span>}
+                  </span>
+                )}
+                {scenarioCounts.validated > 0 && (
+                  <span className="chip brand">🛡️ Validated: {scenarioCounts.validated}</span>
+                )}
+                {scenarioCounts.invalid > 0 && (
+                  <span className="chip bad" style={{ background: "rgba(239, 68, 68, 0.2)", border: "1px solid #ef4444" }}>
+                    ⚠️ Quarantined Invalid: {scenarioCounts.invalid}
+                  </span>
+                )}
+                {scenarioCounts.failed > 0 && (
+                  <span className="chip bad">❌ Failed: {scenarioCounts.failed}</span>
+                )}
+              </div>
+
+              {/* Dedicated Scenario Download Action Buttons */}
+              <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                <button
+                  className="secondary sm"
+                  onClick={() => downloadReport("full")}
+                  title="Download complete audit report including all 27+ original source columns and Medplum URLs"
+                  style={{ fontWeight: 600 }}
+                >
+                  📥 Full Audit CSV ({report.results?.length || 0})
+                </button>
+                <button
+                  className="secondary sm"
+                  onClick={() => downloadReport("quarantine")}
+                  disabled={scenarioCounts.invalid === 0 && scenarioCounts.failed === 0}
+                  title="Export only quarantined/invalid rows with field failure diagnostics for clinical remediation"
+                  style={{
+                    color: (scenarioCounts.invalid > 0 || scenarioCounts.failed > 0) ? "#ef4444" : "var(--muted)",
+                    borderColor: (scenarioCounts.invalid > 0 || scenarioCounts.failed > 0) ? "rgba(239, 68, 68, 0.4)" : "var(--card-border)",
+                    fontWeight: 600,
+                  }}
+                >
+                  🚨 Quarantine Exceptions ({scenarioCounts.invalid + scenarioCounts.failed})
+                </button>
+                <button
+                  className="secondary sm"
+                  onClick={() => downloadReport("manifest")}
+                  disabled={scenarioCounts.delivered === 0}
+                  title="Export delivery manifest of successfully persisted Medplum resources"
+                  style={{
+                    color: scenarioCounts.delivered > 0 ? "var(--ok)" : "var(--muted)",
+                    borderColor: scenarioCounts.delivered > 0 ? "rgba(16, 185, 129, 0.4)" : "var(--card-border)",
+                    fontWeight: 600,
+                  }}
+                >
+                  ✓ Delivery Manifest ({scenarioCounts.delivered})
+                </button>
+                <button
+                  className="secondary sm"
+                  onClick={downloadJSONReport}
+                  title="Download complete JSON audit package"
+                >
+                  💾 JSON Bundle
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* High-Volume Search & Pagination Filter Bar */}
+          {/* High-Volume Search & Scenario Filter Bar */}
           <div
             className="row between"
             style={{
@@ -1238,27 +1390,28 @@ export default function UploadPage() {
                 }}
                 style={{ width: "190px", padding: "4px 8px", fontSize: "12px" }}
               />
-              <div style={{ display: "flex", gap: "4px" }}>
-                {["ALL", "delivered", "dry_run", "invalid", "failed"].map((st) => {
-                  const count =
-                    st === "ALL"
-                      ? report.results?.length || 0
-                      : report.summary?.counts?.[st] || 0;
-                  if (st !== "ALL" && count === 0) return null;
-                  return (
-                    <button
-                      key={st}
-                      className={`secondary sm ${statusFilter === st ? "active-pill" : ""}`}
-                      style={{ fontSize: "11px", padding: "3px 8px" }}
-                      onClick={() => {
-                        setStatusFilter(st);
-                        setCurrentPage(1);
-                      }}
-                    >
-                      {st === "dry_run" ? "validated" : st} ({count})
-                    </button>
-                  );
-                })}
+              <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+                {[
+                  { id: "ALL", label: `ALL (${scenarioCounts.ALL})` },
+                  ...(scenarioCounts.delivered > 0 ? [{ id: "delivered", label: `Delivered (${scenarioCounts.delivered})` }] : []),
+                  ...(scenarioCounts.created > 0 ? [{ id: "created", label: `✨ Created (${scenarioCounts.created})` }] : []),
+                  ...(scenarioCounts.updated > 0 ? [{ id: "updated", label: `🔄 Updated (${scenarioCounts.updated})` }] : []),
+                  ...(scenarioCounts.validated > 0 ? [{ id: "validated", label: `🛡️ Validated (${scenarioCounts.validated})` }] : []),
+                  ...(scenarioCounts.invalid > 0 ? [{ id: "invalid", label: `⚠️ Quarantined (${scenarioCounts.invalid})` }] : []),
+                  ...(scenarioCounts.failed > 0 ? [{ id: "failed", label: `❌ Failed (${scenarioCounts.failed})` }] : []),
+                ].map((st) => (
+                  <button
+                    key={st.id}
+                    className={`secondary sm ${statusFilter === st.id ? "active-pill" : ""}`}
+                    style={{ fontSize: "11px", padding: "3px 8px" }}
+                    onClick={() => {
+                      setStatusFilter(st.id);
+                      setCurrentPage(1);
+                    }}
+                  >
+                    {st.label}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -1364,7 +1517,19 @@ export default function UploadPage() {
                       )}
                     </td>
                     <td>
-                      <span className={`chip ${STATUS_CLASS[r.status] || ""}`}>{r.status}</span>
+                      {r.status === "delivered" ? (
+                        <span className="chip ok">
+                          {deliveryAction === "created" ? "✨ created" : "🔄 updated"}
+                        </span>
+                      ) : r.status === "dry_run" ? (
+                        <span className="chip brand">🛡️ validated</span>
+                      ) : isInvalid ? (
+                        <span className="chip bad" style={{ background: "rgba(239, 68, 68, 0.2)", border: "1px solid #ef4444" }}>
+                          ⚠️ quarantined
+                        </span>
+                      ) : (
+                        <span className={`chip ${STATUS_CLASS[r.status] || ""}`}>{r.status}</span>
+                      )}
                       {r.errors && r.errors.length > 0 && (
                         <div className="error" style={{ fontSize: "11px", marginTop: "4px" }}>
                           {r.errors.join("; ")}

@@ -815,6 +815,96 @@ def test_all_columns_universal_dynamic_coercion():
     assert val_errors == [], f"FHIR validation failed: {val_errors}"
 
 
+def test_upload_pipeline_scenario_reporting_and_quarantine():
+    """Verify ingestion pipeline scenario tracking: validated, invalid, quarantined, and delivery actions."""
+    from app.upload_pipeline import ingest_uploaded_records
+    from app.mapping.models import MappingConfig, Rule
+
+    mapping = MappingConfig(
+        name="test_scenario_mapping",
+        target_resource="Patient",
+        status="approved",
+        rules=[
+            Rule(source="memid", target="identifier[0].value", transform="direct"),
+            Rule(source="fullname", target="name[0].text", transform="direct"),
+            Rule(source="gender", target="gender", transform="direct"),
+            Rule(source="dob", target="birthDate", transform="date"),
+        ]
+    )
+
+    rows = [
+        # Valid record 1
+        {"memid": "MEM001", "fullname": "Alice Smith", "gender": "female", "dob": "1990-01-01"},
+        # Valid record 2
+        {"memid": "MEM002", "fullname": "Bob Jones", "gender": "male", "dob": "1985-05-15"},
+        # Invalid record (invalid birthDate regex in FHIR R4)
+        {"memid": "MEM003", "fullname": "Charlie Invalid", "gender": "male", "dob": "not-a-date"},
+    ]
+
+    report = ingest_uploaded_records(medplum=None, rows=rows, mapping=mapping, dataset_name="test_dataset", dry_run=True)
+    summary = report["summary"]
+    results = report["results"]
+
+    assert summary["total"] == 3
+    assert summary["counts"]["dry_run"] == 2
+    assert summary["counts"]["invalid"] == 1
+
+    # Check valid dry run results
+    r1 = results[0]
+    assert r1["status"] == "dry_run"
+    assert r1["mapping_details"]["delivery_action"] == "validated"
+    assert r1["source_id"] == "MEM001"
+
+    # Check quarantined invalid result
+    r3 = results[2]
+    assert r3["status"] == "invalid"
+    assert r3["mapping_details"]["delivery_action"] == "quarantined"
+    assert r3["mapping_details"]["error_category"] == "schema_validation"
+    assert len(r3["errors"]) > 0
+
+
+def test_stream_uploaded_records_scenario_counts():
+    """Verify stream_uploaded_records yields scenario counts including created, updated, and quarantined."""
+    from app.upload_pipeline import stream_uploaded_records
+    from app.mapping.models import MappingConfig, Rule
+
+    mapping = MappingConfig(
+        name="test_stream_mapping",
+        target_resource="Patient",
+        status="approved",
+        rules=[
+            Rule(source="id", target="identifier[0].value", transform="direct"),
+            Rule(source="name", target="name[0].text", transform="direct"),
+            Rule(source="dob", target="birthDate", transform="direct"),
+        ]
+    )
+
+    rows = [
+        {"id": "S1", "name": "User 1", "dob": "1990-01-01"},
+        {"id": "S2", "name": "User 2", "dob": "not-a-date"},
+    ]
+
+    events = list(stream_uploaded_records(medplum=None, rows=rows, mapping=mapping, dataset_name="stream_test", dry_run=True))
+    assert len(events) == 3  # 2 record events + 1 complete event
+
+    # Check record 1
+    assert events[0]["type"] == "record"
+    assert events[0]["result"]["status"] == "dry_run"
+    assert events[0]["current_counts"]["dry_run"] == 1
+
+    # Check record 2 (quarantined)
+    assert events[1]["type"] == "record"
+    assert events[1]["result"]["status"] == "invalid"
+    assert events[1]["current_counts"]["invalid"] == 1
+
+    # Check complete summary
+    assert events[2]["type"] == "complete"
+    assert events[2]["summary"]["total"] == 2
+    assert events[2]["summary"]["counts"]["dry_run"] == 1
+    assert events[2]["summary"]["counts"]["invalid"] == 1
+
+
+
 
 
 

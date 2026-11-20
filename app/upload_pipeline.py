@@ -144,6 +144,14 @@ def _process_single_record(
             errors=[f"Mapping execution failed: {e}"],
             source_record=row,
             target_record={},
+            mapping_details={
+                "delivery_action": "quarantined",
+                "error_category": "transform_execution",
+                "source_system": dataset_name,
+                "source_id": source_id,
+                "target_system": "Medplum (FHIR R4)",
+                "target_resource": mapping.target_resource,
+            },
         )
 
     if mapping_errs:
@@ -153,6 +161,14 @@ def _process_single_record(
             errors=mapping_errs,
             source_record=row,
             target_record=resource,
+            mapping_details={
+                "delivery_action": "quarantined",
+                "error_category": "transform_syntax",
+                "source_system": dataset_name,
+                "source_id": source_id,
+                "target_system": "Medplum (FHIR R4)",
+                "target_resource": mapping.target_resource,
+            },
         )
 
     # Validate against official FHIR R4 schema
@@ -164,6 +180,14 @@ def _process_single_record(
             errors=val_errors,
             source_record=row,
             target_record=resource,
+            mapping_details={
+                "delivery_action": "quarantined",
+                "error_category": "schema_validation",
+                "source_system": dataset_name,
+                "source_id": source_id,
+                "target_system": "Medplum (FHIR R4)",
+                "target_resource": mapping.target_resource,
+            },
         )
 
     summary = extract_clinical_summary(resource)
@@ -191,6 +215,7 @@ def _process_single_record(
     recon_pre = generate_dynamic_reconciliation(row, resource, source_name=dataset_name, target_name="Medplum", mapping=mapping)
 
     if dry_run or medplum is None:
+        details["delivery_action"] = "validated"
         return RecordResult(
             source_id=source_id,
             status="dry_run",
@@ -206,7 +231,7 @@ def _process_single_record(
         is_created = out.get("_is_created", False)
         details["delivery_action"] = "created" if is_created else "updated"
         recon_post = generate_dynamic_reconciliation(row, out, source_name=dataset_name, target_name="Medplum", mapping=mapping)
-        log.info("Uploaded record delivered", extra={"ctx": {"id": out.get("id")}})
+        log.info("Uploaded record delivered", extra={"ctx": {"id": out.get("id"), "action": details["delivery_action"]}})
         return RecordResult(
             source_id=source_id,
             status="delivered",
@@ -218,6 +243,8 @@ def _process_single_record(
             target_record=out,
         )
     except Exception as e:
+        details["delivery_action"] = "failed"
+        details["error_category"] = "network_api"
         return RecordResult(
             source_id=source_id,
             status="failed",
@@ -247,8 +274,17 @@ def ingest_uploaded_records(
         results.append(res)
 
     counts: dict[str, int] = {}
+    created_count = 0
+    updated_count = 0
     for r in results:
         counts[r.status] = counts.get(r.status, 0) + 1
+        act = (r.mapping_details or {}).get("delivery_action")
+        if act == "created":
+            created_count += 1
+        elif act == "updated":
+            updated_count += 1
+    counts["created"] = created_count
+    counts["updated"] = updated_count
 
     return {
         "summary": {"total": len(results), "counts": counts},
@@ -265,11 +301,17 @@ def stream_uploaded_records(
 ):
     """Yields progress events row-by-row via Server-Sent Events (SSE)."""
     system = f"urn:source:{dataset_name.lower().replace(' ', '-')}"
-    counts = {"delivered": 0, "dry_run": 0, "invalid": 0, "failed": 0}
+    counts = {"delivered": 0, "dry_run": 0, "invalid": 0, "failed": 0, "created": 0, "updated": 0}
 
     for i, row in enumerate(rows):
         res = _process_single_record(i, row, mapping, medplum, dataset_name, dry_run, system)
         counts[res.status] = counts.get(res.status, 0) + 1
+        act = (res.mapping_details or {}).get("delivery_action")
+        if act == "created":
+            counts["created"] = counts.get("created", 0) + 1
+        elif act == "updated":
+            counts["updated"] = counts.get("updated", 0) + 1
+
         yield {
             "type": "record",
             "index": i + 1,
