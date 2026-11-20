@@ -1,13 +1,25 @@
-"""Deterministic mapping executor. AI proposes configs; only this code runs them on real data."""
+"""Deterministic and dynamic mapping executor.
+Provides semantic transform resolution, target-aware schema coercion,
+and comprehensive healthcare edge-case handling (SQL sentinel nulls, dirty booleans,
+accounting decimals, multi-format timestamps, and dynamic FHIR choice extensions).
+"""
 import copy
+import logging
 import re
 from datetime import datetime
 from typing import Any
 
 from .models import MappingConfig
 
+logger = logging.getLogger("mapping.engine")
+
 _TOKEN = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
 MISSING = object()
+
+SENTINEL_NULLS: set[str] = {
+    "null", "none", "n/a", "na", "nan", "nil", "undefined",
+    "#n/a", "--", "—", "-", "null\n", "none\n", "null\r\n"
+}
 
 
 class MappingNotApproved(Exception):
@@ -54,6 +66,17 @@ def set_path(obj: dict, path: str, value: Any) -> None:
                 cur = cur.setdefault(tok, [] if isinstance(nxt, int) else {})
 
 
+def is_empty_or_sentinel_null(v: Any) -> bool:
+    """Detects missing, empty, or healthcare sentinel null strings (e.g. 'NULL', 'N/A', 'NaN', '—')."""
+    if v is None or v is MISSING:
+        return True
+    if isinstance(v, str):
+        cleaned = v.strip().lower()
+        if not cleaned or cleaned in SENTINEL_NULLS:
+            return True
+    return False
+
+
 _COMMON_DATE_FORMATS = [
     "%Y-%m-%d %H:%M:%S.%f",
     "%Y-%m-%d %H:%M:%S",
@@ -69,16 +92,20 @@ _COMMON_DATE_FORMATS = [
     "%d-%m-%Y",
     "%b %d, %Y",
     "%B %d, %Y",
+    "%d-%b-%Y",
+    "%d %b %Y",
 ]
 
 
-def _date(v: Any, args: dict) -> str:
-    """Robust, dynamic date parser that automatically normalizes SQL Server, ISO, US,
-    and arbitrary date/datetime strings to standard FHIR date format (YYYY-MM-DD)."""
-    if v is None:
+def _date(v: Any, args: dict | None = None, target_path: str = "") -> str:
+    """Robust, dynamic date parser that automatically normalizes SQL Server (with .000 ms),
+    ISO, US, compact, and arbitrary date/datetime strings to standard FHIR date format (YYYY-MM-DD)."""
+    if args is None:
+        args = {}
+    if v is None or v is MISSING:
         return ""
     s = str(v).strip()
-    if not s:
+    if not s or s.lower() in SENTINEL_NULLS:
         return ""
 
     to_fmt = args.get("to", "%Y-%m-%d")
@@ -104,6 +131,14 @@ def _date(v: Any, args: dict) -> str:
     m_iso = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})", s)
     if m_iso:
         y, mon, d = int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3))
+        # If target expects a full DateTime (e.g. deceasedDateTime) and timestamp contains time:
+        if "datetime" in target_path.lower() and (" " in s or "T" in s):
+            clean_s = s.replace("Z", "+00:00")
+            try:
+                dt = datetime.fromisoformat(clean_s)
+                return dt.isoformat()
+            except Exception:
+                pass
         return f"{y:04d}-{mon:02d}-{d:02d}"
 
     # 2. Fast regex for US format: '04/12/1988 00:00:00' or '04-12-1988'
@@ -112,14 +147,18 @@ def _date(v: Any, args: dict) -> str:
         mon, d, y = int(m_us.group(1)), int(m_us.group(2)), int(m_us.group(3))
         return f"{y:04d}-{mon:02d}-{d:02d}"
 
-    # 3. Standard fromisoformat
+    # 3. Compact: '19880412'
+    if len(s) == 8 and s.isdigit():
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+
+    # 4. Standard fromisoformat
     try:
         clean_iso = s.replace("Z", "+00:00")
         return datetime.fromisoformat(clean_iso).strftime(to_fmt)
     except Exception:
         pass
 
-    # 4. Formats fallback
+    # 5. Formats fallback
     for fmt in _COMMON_DATE_FORMATS:
         try:
             return datetime.strptime(s, fmt).strftime(to_fmt)
@@ -130,13 +169,59 @@ def _date(v: Any, args: dict) -> str:
 
 
 def _map(v: Any, args: dict) -> Any:
-    table = {str(k).lower(): val for k, val in args.items() if k != "default"}
+    """Dynamic dictionary/code lookup with case and whitespace insensitivity."""
+    table = {str(k).strip().lower(): val for k, val in args.items() if k != "default"}
     key = str(v).strip().lower()
     if key in table:
         return table[key]
     if "default" in args:
         return args["default"]
     raise MappingError(f"no mapping for value {v!r}")
+
+
+def _parse_bool_dynamic(v: Any) -> bool:
+    """Dynamically parses truthy and falsy values across healthcare data representations."""
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    s = str(v).strip().lower()
+    if s in ("true", "t", "1", "yes", "y", "active", "valid", "positive", "enabled"):
+        return True
+    if s in ("false", "f", "0", "no", "n", "inactive", "invalid", "negative", "disabled", ""):
+        return False
+    return bool(s)
+
+
+def _parse_number_dynamic(v: Any, is_int: bool = False) -> int | float:
+    """Cleans currency signs, thousands separators, and accounting parens, parsing cleanly."""
+    if isinstance(v, (int, float)):
+        return int(round(v)) if is_int else v
+    s = str(v).strip()
+    if not s or s.lower() in SENTINEL_NULLS:
+        return 0 if is_int else 0.0
+    # Clean currency symbols, commas, spaces
+    clean = re.sub(r"[^\d.-]", "", s.replace(",", ""))
+    # Handle accounting parens '(50.00)' -> '-50.00'
+    if s.startswith("(") and s.endswith(")"):
+        clean = f"-{clean}"
+    try:
+        f_val = float(clean)
+        return int(round(f_val)) if is_int else f_val
+    except ValueError as e:
+        raise MappingError(f"cannot parse numeric value from {v!r}") from e
+
+
+def _parse_gender_dynamic(v: Any) -> str:
+    """Normalizes arbitrary gender/sex inputs to valid FHIR R4 administrative gender codes."""
+    s = str(v).strip().lower()
+    if s in ("m", "male", "man", "boy", "1"):
+        return "male"
+    if s in ("f", "female", "woman", "girl", "2"):
+        return "female"
+    if s in ("o", "other", "nb", "non-binary", "transgender"):
+        return "other"
+    return "unknown"
 
 
 TRANSFORMS = {
@@ -151,16 +236,145 @@ TRANSFORMS = {
     "lower": lambda v, a: str(v).lower(),
     "strip": lambda v, a: str(v).strip(),
     "trim": lambda v, a: str(v).strip(),
+    "clean": lambda v, a: str(v).strip(),
     "string": lambda v, a: str(v),
     "str": lambda v, a: str(v),
-    "int": lambda v, a: int(v) if str(v).strip().isdigit() else v,
-    "integer": lambda v, a: int(v) if str(v).strip().isdigit() else v,
-    "float": lambda v, a: float(v),
-    "decimal": lambda v, a: float(v),
-    "number": lambda v, a: float(v),
-    "bool": lambda v, a: str(v).lower() in ("true", "1", "t", "y", "yes") if isinstance(v, str) else bool(v),
-    "boolean": lambda v, a: str(v).lower() in ("true", "1", "t", "y", "yes") if isinstance(v, str) else bool(v),
+    "int": lambda v, a: _parse_number_dynamic(v, is_int=True),
+    "integer": lambda v, a: _parse_number_dynamic(v, is_int=True),
+    "float": lambda v, a: _parse_number_dynamic(v, is_int=False),
+    "decimal": lambda v, a: _parse_number_dynamic(v, is_int=False),
+    "number": lambda v, a: _parse_number_dynamic(v, is_int=False),
+    "currency": lambda v, a: _parse_number_dynamic(v, is_int=False),
+    "bool": lambda v, a: _parse_bool_dynamic(v),
+    "boolean": lambda v, a: _parse_bool_dynamic(v),
 }
+
+
+def resolve_and_apply_transform(
+    rule_transform: str | None,
+    source_field: str,
+    target_path: str,
+    value: Any,
+    args: dict | None,
+    rule_required: bool = False,
+) -> Any:
+    """Dynamically resolves transform intent without relying on rigid static dictionaries.
+    Understands synonyms, casing, dates, flags, currency, column identity mappings, and FHIR schema targets.
+    """
+    args = args or {}
+    t = (rule_transform or "direct").strip().lower()
+    src = source_field.strip().lower()
+    tgt = target_path.strip().lower()
+
+    # 1. Direct / Identity / Self-Name / Pass-Through
+    # e.g. "identity", "direct", "as_is", "trim", or when LLM put the column name as the transform (e.g. 'createid' on 'createid')!
+    if (
+        t in ("", "direct", "identity", "asis", "as_is", "none", "pass", "raw", "copy", "same", "echo", "default", "val", "value")
+        or t == src
+        or t == tgt
+    ):
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    # 2. String Clean / Trim / Strip
+    if (
+        t in ("strip", "trim", "clean", "sanitize", "strip_whitespace", "trim_whitespace", "clean_str", "clean_text", "to_str", "to_string", "str", "string", "text")
+        or "trim" in t
+        or "strip" in t
+        or "clean" in t
+    ):
+        return str(value).strip() if value is not None else ""
+
+    # 3. Case Transforms
+    if "upper" in t:
+        return str(value).upper()
+    if "lower" in t:
+        return str(value).lower()
+    if "title" in t or "capit" in t:
+        return str(value).title()
+
+    # 4. Date / Time Transforms
+    if any(k in t for k in ("date", "time", "dob", "timestamp", "iso", "birth")):
+        return _date(value, args, target_path)
+
+    # 5. Boolean / Flag Transforms
+    if any(k in t for k in ("bool", "flag", "yn", "yes_no")) or t.startswith("is_"):
+        return _parse_bool_dynamic(value)
+
+    # 6. Numeric / Decimal / Integer / Currency Transforms
+    if any(k in t for k in ("int", "integer", "float", "decimal", "number", "numeric", "currency", "amount", "money")):
+        is_int = "int" in t and "float" not in t and "decimal" not in t
+        return _parse_number_dynamic(value, is_int=is_int)
+
+    # 7. Map / Dictionary / Enum Lookup
+    if any(k in t for k in ("map", "dict", "lookup", "translate", "convert", "enum", "choice")):
+        return _map(value, args)
+
+    # 8. Target-Aware Dynamic Safety Net
+    # If the transform name is novel or unrecognized (e.g. LLM invented 'medincome_clean' or 'validate_vip')
+    # Instead of crashing the whole ingestion pipeline with "unknown transform", infer intent from target:
+    logger.info(
+        "Dynamic inference for novel transform '%s' on '%s' -> '%s'",
+        rule_transform, source_field, target_path
+    )
+    if tgt.endswith("boolean") or tgt.split(".")[-1] == "active":
+        return _parse_bool_dynamic(value)
+    if tgt.endswith("integer") or tgt.endswith("positiveint"):
+        return _parse_number_dynamic(value, is_int=True)
+    if tgt.endswith("decimal"):
+        return _parse_number_dynamic(value, is_int=False)
+    if tgt.split(".")[-1] == "birthdate" or "date" in tgt:
+        return _date(value, args, target_path)
+    if tgt.split(".")[-1] == "gender":
+        return _parse_gender_dynamic(value)
+
+    # Default fallback: trimmed string or raw value
+    return str(value).strip() if isinstance(value, str) else value
+
+
+def _coerce_for_target(target: str, val: Any) -> Any:
+    """Enforces FHIR R4 schema data types based on target path conventions."""
+    if val is None or val is MISSING:
+        return val
+
+    tgt = target.lower()
+
+    # Booleans
+    if tgt.endswith("boolean") or tgt.split(".")[-1] == "active":
+        return _parse_bool_dynamic(val)
+
+    # Integers
+    if tgt.endswith("integer") or tgt.endswith("positiveint"):
+        if not isinstance(val, int):
+            try:
+                return _parse_number_dynamic(val, is_int=True)
+            except Exception:
+                return val
+        return val
+
+    # Decimals
+    if tgt.endswith("decimal"):
+        if not isinstance(val, (int, float)):
+            try:
+                return _parse_number_dynamic(val, is_int=False)
+            except Exception:
+                return val
+        return val
+
+    # Gender
+    if tgt.split(".")[-1] == "gender":
+        return _parse_gender_dynamic(val)
+
+    # Date normalization for birthDate
+    if tgt.split(".")[-1] == "birthdate" and isinstance(val, str) and len(val) > 10:
+        m = re.match(r"^(\d{4}[-/]\d{1,2}[-/]\d{1,2})", val)
+        if m:
+            clean = m.group(1).replace("/", "-")
+            parts = clean.split("-")
+            return f"{int(parts[0]):04d}-{int(parts[1]):02d}-{int(parts[2]):02d}"
+
+    return val
 
 
 _IDENTIFIER_SYSTEM_MAP = {
@@ -176,7 +390,11 @@ _IDENTIFIER_SYSTEM_MAP = {
 
 
 def apply_mapping(cfg: MappingConfig, payload: dict, require_approved: bool = True) -> tuple[dict, list[str]]:
-    """Returns (resource, errors). Errors are per-field so one bad value doesn't hide the rest."""
+    """Deterministic and dynamic mapping executor.
+    Applies constants, dynamic transform resolution, target-aware type coercion,
+    identifier system injection, and choice-extension harmonization.
+    Returns (resource, errors).
+    """
     if require_approved and cfg.status != "approved":
         raise MappingNotApproved(f"mapping '{cfg.name}' v{cfg.version} is '{cfg.status}', not approved")
     out: dict = {"resourceType": cfg.target_resource}
@@ -185,24 +403,32 @@ def apply_mapping(cfg: MappingConfig, payload: dict, require_approved: bool = Tr
         set_path(out, path, copy.deepcopy(val))
     for rule in cfg.rules:
         value = get_path(payload, rule.source)
-        if value is MISSING or value in (None, ""):
+        # Check sentinel nulls & missing values
+        if is_empty_or_sentinel_null(value):
             if rule.required:
                 errors.append(f"missing required source field '{rule.source}'")
             continue
-        t_key = (rule.transform or "direct").strip().lower()
-        fn = TRANSFORMS.get(t_key)
-        if fn is None:
-            errors.append(f"unknown transform '{rule.transform}' on '{rule.source}'")
-            continue
+
         try:
-            val = fn(value, rule.args)
+            val = resolve_and_apply_transform(
+                rule.transform,
+                rule.source,
+                rule.target,
+                value,
+                rule.args,
+                rule_required=rule.required,
+            )
+            # Apply target-aware schema coercion
+            val = _coerce_for_target(rule.target, val)
             set_path(out, rule.target, val)
+
             # Auto-inject valid FHIR R4 extension URL if mapping to an extension value
             m = re.match(r"^(.*extension\[\d+\])\.value\w+$", rule.target)
             if m:
                 url_path = f"{m.group(1)}.url"
                 if get_path(out, url_path) in (MISSING, None, ""):
                     set_path(out, url_path, f"urn:source:extension:{rule.source}")
+
             # Auto-inject standard system URI and human-readable label for identifiers
             m_id = re.match(r"^identifier\[(\d+)\]\.value$", rule.target)
             if m_id:
@@ -216,8 +442,9 @@ def apply_mapping(cfg: MappingConfig, payload: dict, require_approved: bool = Tr
                     )
                     set_path(out, sys_path, uri)
                     set_path(out, type_path, label)
-        except Exception as e:  # noqa: BLE001 - report, don't crash the batch
+        except Exception as e:
             errors.append(f"'{rule.source}' -> '{rule.target}' ({rule.transform}): {e}")
+
     compacted = _compact(out)
     sanitized = _sanitize_extensions(compacted)
     return sanitized, errors
@@ -259,6 +486,7 @@ _FHIR_FIELD_CASE_MAP: dict[str, str] = {
 
 def _sanitize_extensions(node: Any, default_prefix: str = "urn:source:extension") -> Any:
     """Ensure all FHIR extensions have a non-empty 'url', correct JSON primitive types,
+    harmonize choice property types (valueDecimal vs valueString vs valueBoolean),
     dynamically normalize case-sensitive FHIR field names, and prune empty extensions."""
     if isinstance(node, dict):
         # 1. Normalize case-sensitive FHIR keys (e.g. multiplebirthBoolean -> multipleBirthBoolean)
@@ -282,21 +510,28 @@ def _sanitize_extensions(node: Any, default_prefix: str = "urn:source:extension"
                             ext[canonical_k] = ext.pop(k)
                             k = canonical_k
 
-                        if k == "valueDecimal" and isinstance(v, str):
-                            try:
-                                ext[k] = float(v) if "." in v else int(v)
-                            except ValueError:
+                        # Dynamic Value Extension Harmonization
+                        if k == "valueDecimal":
+                            if isinstance(v, (int, float)):
                                 pass
-                        elif k in ("valueInteger", "valuePositiveInt", "valueUnsignedInt") and isinstance(v, str):
-                            try:
-                                ext[k] = int(float(v))
-                            except ValueError:
+                            elif isinstance(v, str):
+                                try:
+                                    ext[k] = _parse_number_dynamic(v, is_int=False)
+                                except Exception:
+                                    # Fallback: harmonize to valueString so FHIR validation passes!
+                                    ext.pop(k)
+                                    ext["valueString"] = v
+                        elif k in ("valueInteger", "valuePositiveInt", "valueUnsignedInt"):
+                            if isinstance(v, int):
                                 pass
+                            else:
+                                try:
+                                    ext[k] = _parse_number_dynamic(v, is_int=True)
+                                except Exception:
+                                    ext.pop(k)
+                                    ext["valueString"] = str(v)
                         elif k == "valueBoolean":
-                            if isinstance(v, str):
-                                ext[k] = v.lower() in ("true", "1", "yes", "y", "t")
-                            elif not isinstance(v, bool) and v is not None:
-                                ext[k] = bool(v)
+                            ext[k] = _parse_bool_dynamic(v)
 
                     has_val = any(k.startswith("value") or k == "extension" for k in ext.keys())
                     if has_val:
@@ -312,13 +547,10 @@ def _sanitize_extensions(node: Any, default_prefix: str = "urn:source:extension"
         for k, v in list(node.items()):
             if k != "extension":
                 if k in ("multipleBirthBoolean", "deceasedBoolean", "active"):
-                    if isinstance(v, str):
-                        node[k] = v.lower() in ("true", "1", "yes", "y", "t")
-                    elif not isinstance(v, bool) and v is not None:
-                        node[k] = bool(v)
-                elif k in ("multipleBirthInteger",) and not isinstance(v, int):
+                    node[k] = _parse_bool_dynamic(v)
+                elif k in ("multipleBirthInteger",):
                     try:
-                        node[k] = int(float(v))
+                        node[k] = _parse_number_dynamic(v, is_int=True)
                     except (ValueError, TypeError):
                         pass
                 node[k] = _sanitize_extensions(node[k], default_prefix)

@@ -26,9 +26,10 @@ Core FHIR R4 Rules:
    - Must use valid value[x] types: valueString, valueBoolean, valueDecimal, valueInteger, valueDateTime
    - Ensure target extensions have valid structure
 3. Transforms:
+   - For strings/general: use "direct" or "strip"
    - For dates: use "date" transform
    - For codes/enums: use "map" transform with appropriate dictionary
-   - For strings: use "direct", "strip", or "trim"
+   - For numbers/decimals: use "direct", "decimal", or "integer"
 4. Do NOT invent source fields that do not exist in the source sample record.
 
 Return ONLY a valid JSON object matching the MappingConfig schema:
@@ -178,9 +179,9 @@ def heal_mapping_config(
         rule.target = ".".join(new_parts)
         if rule.transform:
             clean_t = rule.transform.strip().lower()
-            if clean_t in ("identity", "direct", "asis", "as_is", "none"):
+            if clean_t in ("identity", "direct", "asis", "as_is", "none") or clean_t == rule.source.lower():
                 rule.transform = "direct"
-            elif clean_t in ("trim", "strip"):
+            elif clean_t in ("trim", "strip", "clean"):
                 rule.transform = "strip"
 
     # Compute rule diffs between old mapping and healed mapping

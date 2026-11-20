@@ -647,6 +647,81 @@ def test_stream_uploaded_records():
     assert complete["summary"]["counts"]["dry_run"] == 3
 
 
+def test_dynamic_transform_resolution_and_edge_cases():
+    """Verify that dynamic transform resolver understands LLM-invented transform names,
+    synonyms ('identity', 'trim', 'clean'), column-name transforms ('createid'),
+    novel transforms via target-aware inference, and sentinel null handling."""
+    from app.mapping.engine import apply_mapping
+    from app.mapping.models import MappingConfig
+    from app.validation import validate_fhir
+
+    mapping = MappingConfig(
+        name="test_dynamic_edge",
+        target_resource="Patient",
+        status="approved",
+        rules=[
+            {"source": "memid", "target": "identifier[0].value", "required": True},
+            {"source": "medincome", "target": "extension[0].valueDecimal", "transform": "identity"},
+            {"source": "lastupdate", "target": "extension[1].valueString", "transform": "trim"},
+            {"source": "createid", "target": "extension[2].valueString", "transform": "createid"},
+            {"source": "isvip", "target": "extension[3].valueBoolean", "transform": "to_bool"},
+            {"source": "novel_field", "target": "extension[4].valueDecimal", "transform": "novel_ai_calc"},
+            {"source": "sentinel_col", "target": "extension[5].valueString", "transform": "trim"},
+            {"source": "dob", "target": "birthDate", "transform": "date"},
+            {"source": "sex", "target": "gender", "transform": "gender_detect"},
+        ]
+    )
+
+    row = {
+        "memid": "MEM001",
+        "medincome": " $75,500.00 ",
+        "lastupdate": "  2024-05-01 10:00:00  ",
+        "createid": "SYSTEM_ADMIN",
+        "isvip": "Y",
+        "novel_field": "$1,200",
+        "sentinel_col": "NULL",  # Sentinel null string -> should be omitted safely
+        "dob": "1992-08-15 00:00:00.000",
+        "sex": "Female",
+    }
+
+    res, errors = apply_mapping(mapping, row)
+    assert errors == [], f"Unexpected mapping errors: {errors}"
+    assert res["birthDate"] == "1992-08-15"
+    assert res["gender"] == "female"
+    assert res["extension"][0]["valueDecimal"] == 75500.0
+    assert res["extension"][1]["valueString"] == "2024-05-01 10:00:00"
+    assert res["extension"][2]["valueString"] == "SYSTEM_ADMIN"
+    assert res["extension"][3]["valueBoolean"] is True
+    assert res["extension"][4]["valueDecimal"] == 1200.0
+    # sentinel_col should not be present in extensions
+    ext_urls = [e["url"] for e in res["extension"]]
+    assert "urn:source:extension:sentinel_col" not in ext_urls
+
+    val_errors = validate_fhir(res)
+    assert val_errors == [], f"FHIR validation errors: {val_errors}"
+
+
+def test_sentinel_null_on_required_field_raises_error():
+    """Verify that a sentinel null ('N/A', 'NULL', 'NaN') on a required field fails validation cleanly."""
+    from app.mapping.engine import apply_mapping
+    from app.mapping.models import MappingConfig
+
+    mapping = MappingConfig(
+        name="test_req_null",
+        target_resource="Patient",
+        status="approved",
+        rules=[
+            {"source": "memid", "target": "identifier[0].value", "required": True},
+        ]
+    )
+
+    for sentinel in ("NULL", "null", "N/A", "NaN", "None", "—", ""):
+        res, errors = apply_mapping(mapping, {"memid": sentinel})
+        assert len(errors) == 1
+        assert "missing required source field 'memid'" in errors[0]
+
+
+
 
 
 
