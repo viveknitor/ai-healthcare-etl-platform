@@ -32,6 +32,10 @@ export default function PipelinePage() {
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveError, setLiveError] = useState("");
   const [copiedKey, setCopiedKey] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
 
   const openInspector = (record) => {
     setActiveRecord(record);
@@ -427,112 +431,300 @@ export default function PipelinePage() {
             </div>
           </div>
 
-          <table>
-            <thead>
-              <tr>
-                <th style={{ width: "5%" }}>#</th>
-                <th style={{ width: "24%" }}>Source {resourceType} (HAPI)</th>
-                <th style={{ width: "20%" }}>Clinical Metric / Demographics</th>
-                <th style={{ width: "25%" }}>Cross-Resource Links &amp; Identity</th>
-                <th style={{ width: "16%" }}>Target Medplum Record</th>
-                <th style={{ width: "10%" }}>Status</th>
-                <th style={{ width: "8%", textAlign: "right" }}>Inspect</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.results.map((r, i) => {
-                const s = r.patient_summary || {};
-                const m = r.mapping_details || {};
-                const deliveryAction = m.delivery_action;
+          {/* High-Volume Search & Pagination Filter Bar */}
+          {(() => {
+            const rawResults = report?.results || [];
+            const filteredResults = rawResults.filter((r) => {
+              if (statusFilter !== "ALL" && r.status !== statusFilter) return false;
+              if (!searchTerm.trim()) return true;
+              const term = searchTerm.toLowerCase();
+              const s = r.patient_summary || {};
+              const m = r.mapping_details || {};
+              return (
+                (r.source_id && String(r.source_id).toLowerCase().includes(term)) ||
+                (r.target_id && String(r.target_id).toLowerCase().includes(term)) ||
+                (s.title && String(s.title).toLowerCase().includes(term)) ||
+                (s.code && String(s.code).toLowerCase().includes(term)) ||
+                (s.primary_value && String(s.primary_value).toLowerCase().includes(term)) ||
+                (m.idempotent_identifier && String(m.idempotent_identifier).toLowerCase().includes(term))
+              );
+            });
 
-                return (
-                  <tr key={i}>
-                    <td style={{ color: "var(--text-muted)", fontWeight: 600 }}>{offset + i + 1}</td>
-                    <td>
-                      <strong style={{ fontSize: "14px", color: "#fff" }}>{s.title || "Unknown"}</strong>
-                      <div className="sub-meta">
-                        Source ID: <code>{r.source_id}</code>
-                        {s.code && s.code !== "—" && ` • Code: ${s.code}`}
-                      </div>
-                    </td>
-                    <td>
-                      <div style={{ color: "var(--brand)", fontWeight: 600 }}>{s.primary_value || "—"}</div>
-                      <div className="sub-meta">
-                        {s.subtitle ? s.subtitle : `Secondary: ${s.secondary_value || "—"}`}
-                      </div>
-                    </td>
-                    <td>
-                      <div>
-                        <span className="rule-tag">ID: {m.idempotent_identifier || `urn:source:hapi|${r.source_id}`}</span>
-                      </div>
-                      {s.subject_reference && s.subject_reference !== "—" && (
-                        <div className="sub-meta" style={{ marginTop: "3px" }}>
-                          <span style={{ color: "var(--text-muted)" }}>Links to: </span>
-                          <span style={{ color: "var(--brand)", fontFamily: "ui-monospace, monospace", fontSize: "11px" }}>
-                            {s.subject_reference} ➔ {m.target_subject_reference}
-                          </span>
-                        </div>
-                      )}
-                      <div className="sub-meta">
-                        Stripped: <code>id</code>, <code>meta</code>, <code>text</code> • FHIR R4 Valid
-                      </div>
-                    </td>
-                    <td>
-                      {r.target_id ? (
-                        <div>
-                          <a
-                            href={`http://localhost:3000/${resourceType}/${r.target_id}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="target-link"
-                            title={`Click to view this ${resourceType} in Medplum Web App`}
+            const totalPages = Math.ceil(filteredResults.length / pageSize) || 1;
+            const safePage = Math.min(currentPage, totalPages);
+            const paginatedResults = filteredResults.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+            return (
+              <>
+                <div
+                  className="row between"
+                  style={{
+                    margin: "0 0 12px",
+                    padding: "8px 12px",
+                    background: "rgba(0,0,0,0.25)",
+                    borderRadius: "var(--radius-sm)",
+                    border: "1px solid var(--card-border)",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "10px",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                    <input
+                      type="text"
+                      placeholder={`🔍 Search ${resourceType} ID or name...`}
+                      value={searchTerm}
+                      onChange={(e) => {
+                        setSearchTerm(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                      style={{ width: "210px", padding: "4px 8px", fontSize: "12px" }}
+                    />
+                    <div style={{ display: "flex", gap: "4px" }}>
+                      {["ALL", "delivered", "dry_run", "invalid", "failed"].map((st) => {
+                        const cnt = st === "ALL"
+                          ? rawResults.length
+                          : rawResults.filter((r) => r.status === st).length;
+                        if (cnt === 0 && st !== "ALL") return null;
+                        const active = statusFilter === st;
+                        return (
+                          <button
+                            key={st}
+                            onClick={() => {
+                              setStatusFilter(st);
+                              setCurrentPage(1);
+                            }}
+                            style={{
+                              fontSize: "11px",
+                              padding: "3px 8px",
+                              borderRadius: "12px",
+                              border: active ? "1px solid var(--brand)" : "1px solid var(--card-border)",
+                              background: active ? "var(--brand)" : "rgba(255,255,255,0.05)",
+                              color: active ? "#fff" : "var(--text-muted)",
+                              cursor: "pointer",
+                            }}
                           >
-                            {r.target_id.slice(0, 16)}… ↗
-                          </a>
-                          <div className="sub-meta">
-                            {deliveryAction === "created" ? (
-                              <span style={{ color: "var(--ok)", fontWeight: 600 }}>+ Newly Created in DB</span>
-                            ) : deliveryAction === "updated" ? (
-                              <span style={{ color: "var(--info)", fontWeight: 600 }}>↻ Updated Existing Record</span>
-                            ) : (
-                              `Saved in Medplum ${resourceType}`
-                            )}
-                          </div>
-                        </div>
-                      ) : r.status === "dry_run" ? (
-                        <span className="sub-meta" style={{ fontStyle: "italic", color: "var(--text-muted)" }}>
-                          Validated (Ready to commit)
-                        </span>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td>
-                      <span className={`chip ${STATUS_CLASS[r.status] || ""}`}>{r.status}</span>
-                      {deliveryAction && (
-                        <span
-                          className={`chip ${deliveryAction === "created" ? "ok" : "info"}`}
-                          style={{ marginLeft: "4px", fontSize: "11px" }}
-                        >
-                          {deliveryAction}
-                        </span>
-                      )}
-                      {r.errors && r.errors.length > 0 && (
-                        <div className="error" style={{ fontSize: "12px", marginTop: "4px" }}>
-                          {r.errors.join("; ")}
-                        </div>
-                      )}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      <button className="secondary sm" onClick={() => openInspector(r)}>
-                        Inspect
+                            {st === "dry_run" ? "validated" : st} ({cnt})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "var(--text-muted)" }}>
+                    <span>Rows per page:</span>
+                    <select
+                      value={pageSize}
+                      onChange={(e) => {
+                        setPageSize(Number(e.target.value));
+                        setCurrentPage(1);
+                      }}
+                      style={{ padding: "3px 6px", fontSize: "11px" }}
+                    >
+                      <option value={10}>10</option>
+                      <option value={15}>15</option>
+                      <option value={25}>25</option>
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                    </select>
+
+                    <div style={{ display: "flex", gap: "4px", marginLeft: "8px" }}>
+                      <button
+                        className="secondary sm"
+                        disabled={safePage <= 1}
+                        onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                        style={{ padding: "2px 8px", fontSize: "11px" }}
+                      >
+                        ◀
                       </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      <span style={{ padding: "2px 6px", alignSelf: "center" }}>
+                        {safePage} / {totalPages}
+                      </span>
+                      <button
+                        className="secondary sm"
+                        disabled={safePage >= totalPages}
+                        onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                        style={{ padding: "2px 8px", fontSize: "11px" }}
+                      >
+                        ▶
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ width: "5%" }}>#</th>
+                      <th style={{ width: "24%" }}>Source {resourceType} (HAPI)</th>
+                      <th style={{ width: "20%" }}>Clinical Metric / Demographics</th>
+                      <th style={{ width: "25%" }}>Cross-Resource Links &amp; Identity</th>
+                      <th style={{ width: "16%" }}>Target Medplum Record</th>
+                      <th style={{ width: "10%" }}>Status</th>
+                      <th style={{ width: "8%", textAlign: "right" }}>Inspect</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedResults.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>
+                          No records match search filter: &ldquo;{searchTerm}&rdquo;
+                        </td>
+                      </tr>
+                    ) : (
+                      paginatedResults.map((r, i) => {
+                        const s = r.patient_summary || {};
+                        const m = r.mapping_details || {};
+                        const deliveryAction = m.delivery_action;
+                        const rowIdx = (safePage - 1) * pageSize + i + 1;
+
+                        return (
+                          <tr key={i}>
+                            <td style={{ color: "var(--text-muted)", fontWeight: 600 }}>{offset + rowIdx}</td>
+                            <td>
+                              <strong style={{ fontSize: "14px", color: "#fff" }}>{s.title || "Unknown"}</strong>
+                              <div className="sub-meta">
+                                Source ID: <code>{r.source_id}</code>
+                                {s.code && s.code !== "—" && ` • Code: ${s.code}`}
+                              </div>
+                            </td>
+                            <td>
+                              <div style={{ color: "var(--brand)", fontWeight: 600 }}>{s.primary_value || "—"}</div>
+                              <div className="sub-meta">
+                                {s.subtitle ? s.subtitle : `Secondary: ${s.secondary_value || "—"}`}
+                              </div>
+                            </td>
+                            <td>
+                              <div>
+                                <span className="rule-tag">ID: {m.idempotent_identifier || `urn:source:hapi|${r.source_id}`}</span>
+                              </div>
+                              {s.subject_reference && s.subject_reference !== "—" && (
+                                <div className="sub-meta" style={{ marginTop: "3px" }}>
+                                  <span style={{ color: "var(--text-muted)" }}>Links to: </span>
+                                  <span style={{ color: "var(--brand)", fontFamily: "ui-monospace, monospace", fontSize: "11px" }}>
+                                    {s.subject_reference} ➔ {m.target_subject_reference}
+                                  </span>
+                                </div>
+                              )}
+                              <div className="sub-meta">
+                                Stripped: <code>id</code>, <code>meta</code>, <code>text</code> • FHIR R4 Valid
+                              </div>
+                            </td>
+                            <td>
+                              {r.target_id ? (
+                                <div>
+                                  <a
+                                    href={`http://localhost:3000/${resourceType}/${r.target_id}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="target-link"
+                                    title={`Click to view this ${resourceType} in Medplum Web App`}
+                                  >
+                                    {r.target_id.slice(0, 16)}… ↗
+                                  </a>
+                                  <div className="sub-meta">
+                                    {deliveryAction === "created" ? (
+                                      <span style={{ color: "var(--ok)", fontWeight: 600 }}>+ Newly Created in DB</span>
+                                    ) : deliveryAction === "updated" ? (
+                                      <span style={{ color: "var(--info)", fontWeight: 600 }}>↻ Updated Existing Record</span>
+                                    ) : (
+                                      `Saved in Medplum ${resourceType}`
+                                    )}
+                                  </div>
+                                </div>
+                              ) : r.status === "dry_run" ? (
+                                <span className="sub-meta" style={{ fontStyle: "italic", color: "var(--text-muted)" }}>
+                                  Validated (Ready to commit)
+                                </span>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                            <td>
+                              <span className={`chip ${STATUS_CLASS[r.status] || ""}`}>{r.status}</span>
+                              {deliveryAction && (
+                                <span
+                                  className={`chip ${deliveryAction === "created" ? "ok" : "info"}`}
+                                  style={{ marginLeft: "4px", fontSize: "11px" }}
+                                >
+                                  {deliveryAction}
+                                </span>
+                              )}
+                              {r.errors && r.errors.length > 0 && (
+                                <div className="error" style={{ fontSize: "12px", marginTop: "4px" }}>
+                                  {r.errors.join("; ")}
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ textAlign: "right" }}>
+                              <button className="secondary sm" onClick={() => openInspector(r)}>
+                                Inspect
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+
+                {/* Footer Pagination Navigation */}
+                {totalPages > 1 && (
+                  <div
+                    className="row between"
+                    style={{
+                      marginTop: "12px",
+                      paddingTop: "8px",
+                      borderTop: "1px solid var(--card-border)",
+                      alignItems: "center",
+                      fontSize: "12px",
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    <span>
+                      Showing {Math.min(filteredResults.length, (safePage - 1) * pageSize + 1)} to{" "}
+                      {Math.min(filteredResults.length, safePage * pageSize)} of {filteredResults.length} records
+                    </span>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <button
+                        className="secondary sm"
+                        disabled={safePage <= 1}
+                        onClick={() => setCurrentPage(1)}
+                        title="First page"
+                      >
+                        «
+                      </button>
+                      <button
+                        className="secondary sm"
+                        disabled={safePage <= 1}
+                        onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      >
+                        Previous
+                      </button>
+                      <span style={{ padding: "4px 8px", fontWeight: 600, color: "#fff" }}>
+                        Page {safePage} of {totalPages}
+                      </span>
+                      <button
+                        className="secondary sm"
+                        disabled={safePage >= totalPages}
+                        onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      >
+                        Next
+                      </button>
+                      <button
+                        className="secondary sm"
+                        disabled={safePage >= totalPages}
+                        onClick={() => setCurrentPage(totalPages)}
+                        title="Last page"
+                      >
+                        »
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       )}
 

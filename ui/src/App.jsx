@@ -25,8 +25,8 @@ export default function App() {
         <div className="brand-wrapper">
           <div className="brand-icon">⚡</div>
           <div className="brand-text">
-            <h1>Healthcare ETL &amp; Ingestion</h1>
-            <span className="brand-tagline">AI-Powered • FHIR R4 • Idempotent Medplum Reconciler</span>
+            <h1>Healthcare ETL &amp; Interoperability Platform</h1>
+            <span className="brand-tagline">Autonomous Multi-Agent Core • HL7 FHIR R4 • Idempotent Medplum Reconciler</span>
           </div>
         </div>
 
@@ -46,21 +46,25 @@ export default function App() {
 
         {/* Live System Status Badges */}
         <div className="system-status-pills">
-          <div className="status-pill" title="Local Medplum FHIR API status">
+          <div className="status-pill" title="Target FHIR R4 Destination">
             <span className="status-dot ok" />
             <span>Medplum :8103</span>
           </div>
           <div className="status-pill" title="Backend FastAPI status">
             <span className={`status-dot ${online === null ? "" : online ? "ok" : "bad"}`} />
-            <span>{online === null ? "Connecting…" : online ? "FastAPI Online" : "FastAPI Offline"}</span>
+            <span>{online === null ? "Connecting…" : online ? "FastAPI Core Ready" : "FastAPI Offline"}</span>
+          </div>
+          <div className="status-pill" title="AI Semantic Reasoning Engine">
+            <span className="status-dot ok" style={{ background: "#a855f7", boxShadow: "0 0 8px #a855f7" }} />
+            <span>Gemini 2.5 Flash</span>
           </div>
         </div>
       </header>
 
       <main>
         {tab === "pipeline" && <PipelinePage />}
-        {tab === "mapping" && <MappingPage />}
         {tab === "upload" && <UploadPage />}
+        {tab === "mapping" && <MappingPage />}
       </main>
     </div>
   );
