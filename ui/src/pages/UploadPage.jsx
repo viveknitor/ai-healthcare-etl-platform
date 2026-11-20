@@ -108,6 +108,10 @@ export default function UploadPage() {
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [editingRow, setEditingRow] = useState(null);
+  const [editingError, setEditingError] = useState("");
+  const [isAddingRecord, setIsAddingRecord] = useState(false);
+  const [newRecordData, setNewRecordData] = useState({});
 
   const handleFileUpload = async (file) => {
     if (!file) return;
@@ -224,26 +228,48 @@ export default function UploadPage() {
     const activeMapping = overrideMapping || mapping;
     if (!fileData?.all_rows || !activeMapping) return;
 
-    // Quality Gate: Mandatory validation before delivering to Medplum
-    if (!dryRun && !isValidated) {
+    const validCount = (report?.summary?.counts?.dry_run || 0) + (report?.summary?.counts?.delivered || 0);
+    const invalidCount = report?.summary?.counts?.invalid || 0;
+
+    // Quality Gate: Pre-flight validation is required before live delivery
+    if (!dryRun && validCount === 0 && !isValidated) {
       alert("🛡️ Mandatory Quality Gate: Pre-flight validation is required before delivering to Medplum. Please run 'Step 1: Validate Schema' first.");
       return;
     }
 
-    if (
-      !dryRun &&
-      !window.confirm(
-        `Deliver ${fileData.all_rows.length} validated records directly to Medplum (${targetResource})? Continue?`
-      )
-    ) {
-      return;
+    let rowsToProcess = fileData.all_rows;
+    if (!dryRun) {
+      if (invalidCount > 0) {
+        if (
+          !window.confirm(
+            `Quality Gate Notice: ${validCount} records are validated and ${invalidCount} are invalid.\n\nDeliver the ${validCount} validated records directly to Medplum?\n(${invalidCount} invalid record(s) will be quarantined and kept in review).`
+          )
+        ) {
+          return;
+        }
+        // Filter out invalid rows from delivery batch
+        const invalidSet = new Set(
+          (report?.results || [])
+            .map((r, idx) => (r.status === "invalid" ? idx : -1))
+            .filter((idx) => idx !== -1)
+        );
+        rowsToProcess = fileData.all_rows.filter((_, idx) => !invalidSet.has(idx));
+      } else {
+        if (
+          !window.confirm(
+            `Deliver ${fileData.all_rows.length} validated records directly to Medplum (${targetResource})? Continue?`
+          )
+        ) {
+          return;
+        }
+      }
     }
 
     setBusy(dryRun ? "validating" : "delivering");
     setError("");
     setCurrentPage(1);
 
-    const total = fileData.all_rows.length;
+    const total = rowsToProcess.length;
     setStreamState({
       active: true,
       current: 0,
@@ -264,7 +290,7 @@ export default function UploadPage() {
 
     try {
       await api.executeUploadIngestionStream({
-        rows: fileData.all_rows,
+        rows: rowsToProcess,
         mapping: activeMapping,
         dry_run: dryRun,
         dataset_name: datasetName,
@@ -296,14 +322,10 @@ export default function UploadPage() {
           setStreamState((prev) => ({ ...prev, active: false, percent: 100 }));
           setBusy("");
           const counts = completeEvent.summary?.counts || {};
-          const hasErr = (counts.invalid || 0) > 0 || (counts.failed || 0) > 0;
+          const valid = (counts.dry_run || 0) + (counts.delivered || 0);
           if (dryRun) {
-            if (!hasErr && (completeEvent.summary?.total || 0) > 0) {
-              setIsValidated(true);
-              setIsDelivered(false);
-            } else {
-              setIsValidated(false);
-            }
+            setIsValidated(valid > 0);
+            setIsDelivered(false);
           } else {
             setIsDelivered(true);
           }
@@ -392,6 +414,151 @@ export default function UploadPage() {
     navigator.clipboard.writeText(JSON.stringify(data, null, 2));
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(""), 2000);
+  };
+
+  const handleStartEdit = (index, result) => {
+    const rawRow = result.source_record || fileData?.all_rows?.[index] || {};
+    setEditingRow({
+      index,
+      sourceId: result.source_id,
+      errors: result.errors || [],
+      data: { ...rawRow },
+    });
+    setEditingError("");
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingRow || !mapping) return;
+    try {
+      const transformRes = await api.transform(mapping, editingRow.data);
+      const valErrors = transformRes.validation_errors || [];
+      const mapErrors = transformRes.mapping_errors || [];
+      const allErrors = [...mapErrors, ...valErrors];
+
+      const updatedAll = [...(fileData.all_rows || [])];
+      updatedAll[editingRow.index] = editingRow.data;
+      setFileData((prev) => ({ ...prev, all_rows: updatedAll }));
+
+      const updatedResults = [...(report?.results || [])];
+      const isNowValid = allErrors.length === 0;
+      updatedResults[editingRow.index] = {
+        ...updatedResults[editingRow.index],
+        status: isNowValid ? "dry_run" : "invalid",
+        errors: allErrors,
+        source_record: editingRow.data,
+        target_record: transformRes.resource || {},
+        reconciliation_table: transformRes.reconciliation_table || [],
+        patient_summary: {
+          title: editingRow.data.fullname || editingRow.data.name || "Record",
+          subtitle: `Gender: ${transformRes.resource?.gender || "—"} | DOB: ${transformRes.resource?.birthDate || "—"}`,
+        },
+      };
+
+      const newCounts = {};
+      updatedResults.forEach((r) => {
+        newCounts[r.status] = (newCounts[r.status] || 0) + 1;
+      });
+
+      setReport((prev) => ({
+        ...prev,
+        summary: { total: updatedAll.length, counts: newCounts },
+        results: updatedResults,
+      }));
+
+      if (isNowValid) {
+        setEditingRow(null);
+        if ((newCounts.invalid || 0) === 0 && (newCounts.dry_run || 0) > 0) {
+          setIsValidated(true);
+        }
+      } else {
+        setEditingError(allErrors.join("; "));
+      }
+    } catch (e) {
+      setEditingError(`Validation failed: ${e.message}`);
+    }
+  };
+
+  const handleDeleteRecord = (index) => {
+    const id = fileData?.all_rows?.[index]?.memid || report?.results?.[index]?.source_id || `#${index + 1}`;
+    if (!window.confirm(`Exclude record ${id} from this ingestion batch?`)) return;
+
+    const updatedAll = (fileData.all_rows || []).filter((_, i) => i !== index);
+    setFileData((prev) => ({ ...prev, all_rows: updatedAll, total_rows: updatedAll.length }));
+
+    const updatedResults = (report?.results || []).filter((_, i) => i !== index);
+    const newCounts = {};
+    updatedResults.forEach((r) => {
+      newCounts[r.status] = (newCounts[r.status] || 0) + 1;
+    });
+
+    setReport((prev) => ({
+      ...prev,
+      summary: { total: updatedAll.length, counts: newCounts },
+      results: updatedResults,
+    }));
+
+    if ((newCounts.invalid || 0) === 0 && (newCounts.dry_run || 0) > 0) {
+      setIsValidated(true);
+    }
+    if (activeRecord && report?.results?.[index]?.source_id === activeRecord.source_id) {
+      setActiveRecord(null);
+    }
+  };
+
+  const handleStartAddRecord = () => {
+    const initial = {};
+    (fileData?.headers || []).forEach((h) => {
+      initial[h] = "";
+    });
+    setNewRecordData(initial);
+    setIsAddingRecord(true);
+    setEditingError("");
+  };
+
+  const handleSaveAddRecord = async () => {
+    if (!newRecordData || !mapping) return;
+    try {
+      const transformRes = await api.transform(mapping, newRecordData);
+      const valErrors = transformRes.validation_errors || [];
+      const mapErrors = transformRes.mapping_errors || [];
+      const allErrors = [...mapErrors, ...valErrors];
+      const isNowValid = allErrors.length === 0;
+
+      const updatedAll = [...(fileData.all_rows || []), newRecordData];
+      setFileData((prev) => ({ ...prev, all_rows: updatedAll, total_rows: updatedAll.length }));
+
+      const newResult = {
+        source_id: newRecordData.memid || newRecordData.id || `row-${updatedAll.length}`,
+        status: isNowValid ? "dry_run" : "invalid",
+        errors: allErrors,
+        source_record: newRecordData,
+        target_record: transformRes.resource || {},
+        reconciliation_table: transformRes.reconciliation_table || [],
+        patient_summary: {
+          title: newRecordData.fullname || newRecordData.name || "Record",
+          subtitle: `Gender: ${transformRes.resource?.gender || "—"} | DOB: ${transformRes.resource?.birthDate || "—"}`,
+        },
+      };
+
+      const updatedResults = [...(report?.results || []), newResult];
+      const newCounts = {};
+      updatedResults.forEach((r) => {
+        newCounts[r.status] = (newCounts[r.status] || 0) + 1;
+      });
+
+      setReport((prev) => ({
+        ...prev,
+        summary: { total: updatedAll.length, counts: newCounts },
+        results: updatedResults,
+      }));
+
+      setIsAddingRecord(false);
+      if ((newCounts.invalid || 0) === 0 && (newCounts.dry_run || 0) > 0) {
+        setIsValidated(true);
+      }
+    } catch (e) {
+      setEditingError(`Failed to add record: ${e.message}`);
+    }
   };
 
   const downloadCSVReport = () => {
@@ -604,7 +771,10 @@ export default function UploadPage() {
         const allHeaders = fileData?.headers || [];
         const unmappedHeaders = allHeaders.filter((h) => !mappedSources.has(h));
         const deliveredCount = report?.summary?.counts?.delivered || 0;
+        const validCount = (report?.summary?.counts?.dry_run || 0) + deliveredCount;
+        const invalidCount = report?.summary?.counts?.invalid || 0;
         const hasDelivered = (isDelivered || deliveredCount > 0) && (report?.summary?.counts?.dry_run || 0) === 0;
+        const canDeliver = approved && !busy && (validCount > 0 || isValidated);
 
         return (
           <>
@@ -698,9 +868,9 @@ export default function UploadPage() {
                   </button>
 
                   <button
-                    className={`primary success ${hasDelivered ? "delivered-btn" : !isValidated ? "disabled-btn" : ""}`}
+                    className={`primary success ${hasDelivered ? "delivered-btn" : !canDeliver ? "disabled-btn" : ""}`}
                     onClick={() => runIngestion(false)}
-                    disabled={!approved || !!busy}
+                    disabled={!canDeliver}
                     style={{
                       minWidth: "210px",
                       background: hasDelivered
@@ -713,19 +883,21 @@ export default function UploadPage() {
                     }}
                     title={
                       hasDelivered
-                        ? `All ${deliveredCount || fileData?.total_rows || 0} records have been successfully delivered to Medplum. Click to re-run ingestion if needed.`
-                        : isValidated
-                        ? "Deliver to Medplum"
-                        : "Pre-flight validation required before delivery"
+                        ? `All ${deliveredCount || fileData?.total_rows || 0} records have been successfully delivered to Medplum.`
+                        : invalidCount > 0
+                        ? `Deliver ${validCount} validated records to Medplum (quarantining ${invalidCount} invalid).`
+                        : `Deliver ${validCount || fileData?.total_rows || 0} records to Medplum.`
                     }
                   >
                     {busy === "delivering"
                       ? "Ingesting to Medplum…"
                       : hasDelivered
                       ? `✓ Delivered All ${deliveredCount || fileData?.total_rows || 0} to Medplum`
-                      : !isValidated
+                      : invalidCount > 0 && validCount > 0
+                      ? `⚡ Ingest Validated (${validCount}) (Quarantine ${invalidCount})`
+                      : !canDeliver
                       ? `⚡ Step 2: Ingest (${fileData?.total_rows || 0})`
-                      : `⚡ Deliver All ${fileData?.total_rows || 0} to Medplum`}
+                      : `⚡ Deliver All ${validCount || fileData?.total_rows || 0} to Medplum`}
                   </button>
                 </div>
               </div>
@@ -758,19 +930,38 @@ export default function UploadPage() {
                     </div>
                   </div>
 
-                  <button
-                    className="primary"
-                    onClick={() => triggerSelfHeal()}
-                    disabled={!!busy}
-                    style={{
-                      background: "linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)",
-                      borderColor: "rgba(255, 255, 255, 0.3)",
-                      boxShadow: "0 4px 14px rgba(236, 72, 153, 0.4)",
-                      minWidth: "250px",
-                    }}
-                  >
-                    {busy === "healing" ? "🩹 Healing Schema in Progress…" : "🩹 AI Auto-Heal Contract with Gemini"}
-                  </button>
+                  <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                    <button
+                      className="secondary"
+                      onClick={() => {
+                        setStatusFilter("invalid");
+                        const tbl = document.getElementById("ingestion-results-section");
+                        if (tbl) tbl.scrollIntoView({ behavior: "smooth" });
+                      }}
+                      style={{
+                        background: "rgba(239, 68, 68, 0.2)",
+                        color: "#fca5a5",
+                        borderColor: "rgba(239, 68, 68, 0.5)",
+                        fontSize: "12px",
+                      }}
+                    >
+                      🔍 View Invalid Record ({report.summary?.counts?.invalid || 1})
+                    </button>
+
+                    <button
+                      className="primary"
+                      onClick={() => triggerSelfHeal()}
+                      disabled={!!busy}
+                      style={{
+                        background: "linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)",
+                        borderColor: "rgba(255, 255, 255, 0.3)",
+                        boxShadow: "0 4px 14px rgba(236, 72, 153, 0.4)",
+                        minWidth: "250px",
+                      }}
+                    >
+                      {busy === "healing" ? "🩹 Healing Schema in Progress…" : "🩹 AI Auto-Heal Contract with Gemini"}
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -981,7 +1172,7 @@ export default function UploadPage() {
             </div>
           )}
 
-          <div className="row between" style={{ marginTop: 0, marginBottom: "12px" }}>
+          <div id="ingestion-results-section" className="row between" style={{ marginTop: 0, marginBottom: "12px" }}>
             <div>
               <h2>Ingestion Results: {fileData?.filename}</h2>
               <p className="sub-meta">
@@ -989,7 +1180,7 @@ export default function UploadPage() {
               </p>
             </div>
 
-            <div className="chips" style={{ margin: 0, display: "flex", gap: "8px", alignItems: "center" }}>
+            <div className="chips" style={{ margin: 0, display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
               <span className="chip">Total: {report.summary?.total}</span>
               {Object.entries(report.summary?.counts || {}).map(([k, v]) => (
                 <span key={k} className={`chip ${STATUS_CLASS[k] || ""}`}>
@@ -1010,6 +1201,14 @@ export default function UploadPage() {
                 title="Download complete JSON audit package"
               >
                 💾 Download JSON
+              </button>
+              <button
+                className="primary sm"
+                onClick={handleStartAddRecord}
+                title="Add a new record to this batch"
+                style={{ marginLeft: "4px" }}
+              >
+                ➕ Add Record
               </button>
             </div>
           </div>
@@ -1108,12 +1307,12 @@ export default function UploadPage() {
           <table>
             <thead>
               <tr>
-                <th style={{ width: "6%" }}>#</th>
-                <th style={{ width: "20%" }}>Source Identifier</th>
-                <th style={{ width: "26%" }}>Clinical / Demographics</th>
-                <th style={{ width: "22%" }}>Target Medplum Link</th>
-                <th style={{ width: "14%" }}>Status</th>
-                <th style={{ width: "12%", textAlign: "right" }}>Inspect</th>
+                <th style={{ width: "5%" }}>#</th>
+                <th style={{ width: "18%" }}>Source Identifier</th>
+                <th style={{ width: "24%" }}>Clinical / Demographics</th>
+                <th style={{ width: "20%" }}>Target Medplum Link</th>
+                <th style={{ width: "15%" }}>Status</th>
+                <th style={{ width: "18%", textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1122,16 +1321,23 @@ export default function UploadPage() {
                 const s = r.patient_summary || {};
                 const m = r.mapping_details || {};
                 const deliveryAction = m.delivery_action;
+                const isInvalid = r.status === "invalid" || (r.errors && r.errors.length > 0);
 
                 return (
-                  <tr key={i}>
+                  <tr
+                    key={i}
+                    style={{
+                      background: isInvalid ? "rgba(239, 68, 68, 0.08)" : undefined,
+                      borderLeft: isInvalid ? "4px solid #ef4444" : undefined,
+                    }}
+                  >
                     <td>{i + 1}</td>
                     <td>
                       <strong>{r.source_id}</strong>
                       <div className="sub-meta">Tag: {datasetName}</div>
                     </td>
                     <td>
-                      <div style={{ color: "var(--brand)", fontWeight: 600 }}>{s.title || "Record"}</div>
+                      <div style={{ color: isInvalid ? "var(--bad)" : "var(--brand)", fontWeight: 600 }}>{s.title || "Record"}</div>
                       <div className="sub-meta">{s.subtitle || s.primary_value || "—"}</div>
                     </td>
                     <td>
@@ -1150,8 +1356,8 @@ export default function UploadPage() {
                           </div>
                         </div>
                       ) : r.status === "dry_run" ? (
-                        <span className="sub-meta" style={{ fontStyle: "italic" }}>
-                          Validated (Ready to commit)
+                        <span className="sub-meta" style={{ fontStyle: "italic", color: "var(--ok)" }}>
+                          ✓ Validated (Ready to commit)
                         </span>
                       ) : (
                         "—"
@@ -1166,9 +1372,27 @@ export default function UploadPage() {
                       )}
                     </td>
                     <td style={{ textAlign: "right" }}>
-                      <button className="secondary sm" onClick={() => setActiveRecord(r)}>
-                        Inspect
-                      </button>
+                      <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", alignItems: "center" }}>
+                        <button className="secondary sm" onClick={() => setActiveRecord(r)} title="Inspect Record">
+                          🔍
+                        </button>
+                        <button
+                          className="secondary sm"
+                          onClick={() => handleStartEdit(i, r)}
+                          title="Edit Record In-Place"
+                          style={{ color: "#38bdf8", borderColor: "rgba(56, 189, 248, 0.4)" }}
+                        >
+                          ✏️ Edit
+                        </button>
+                        <button
+                          className="danger sm"
+                          onClick={() => handleDeleteRecord(i)}
+                          title="Exclude from Batch"
+                          style={{ padding: "3px 7px" }}
+                        >
+                          🗑️
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -1204,9 +1428,21 @@ export default function UploadPage() {
                   </span>
                 )}
               </div>
-              <button className="secondary sm" onClick={() => setActiveRecord(null)}>
-                ✕ Close
-              </button>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <button
+                  className="secondary sm"
+                  onClick={() => {
+                    const idx = report.results.findIndex((r) => r.source_id === activeRecord.source_id);
+                    if (idx !== -1) handleStartEdit(idx, activeRecord);
+                  }}
+                  style={{ color: "#38bdf8", borderColor: "rgba(56, 189, 248, 0.4)" }}
+                >
+                  ✏️ Edit Record
+                </button>
+                <button className="secondary sm" onClick={() => setActiveRecord(null)}>
+                  ✕ Close
+                </button>
+              </div>
             </div>
 
             <div className="modal-tabs">
@@ -1255,6 +1491,118 @@ export default function UploadPage() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. In-Place Edit Record Modal (CRUD: Update) */}
+      {editingRow && (
+        <div className="modal-overlay" onClick={() => setEditingRow(null)}>
+          <div className="modal-box" style={{ maxWidth: "750px" }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <h3 style={{ margin: 0 }}>
+                  ✏️ Edit Record: <code>{editingRow.sourceId}</code>
+                </h3>
+                <span className="sub-meta">Fix source field values in-place and re-validate immediately</span>
+              </div>
+              <button className="secondary sm" onClick={() => setEditingRow(null)}>✕ Close</button>
+            </div>
+
+            {editingError && (
+              <div className="error" style={{ margin: "12px 18px 0" }}>
+                <strong>Validation Violation:</strong> {editingError}
+              </div>
+            )}
+
+            <div className="modal-body" style={{ maxHeight: "60vh", overflowY: "auto", padding: "16px 20px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                {Object.keys(editingRow.data || {}).map((col) => {
+                  const isErrCol = (editingRow.errors || []).some((err) =>
+                    err.toLowerCase().includes(col.toLowerCase())
+                  );
+                  return (
+                    <div key={col}>
+                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: isErrCol ? "var(--bad)" : "var(--muted)", marginBottom: "4px" }}>
+                        {col} {isErrCol && "⚠️"}
+                      </label>
+                      <input
+                        type="text"
+                        value={editingRow.data[col] ?? ""}
+                        onChange={(e) =>
+                          setEditingRow({
+                            ...editingRow,
+                            data: { ...editingRow.data, [col]: e.target.value },
+                          })
+                        }
+                        style={{
+                          width: "100%",
+                          padding: "6px 10px",
+                          fontSize: "12px",
+                          borderColor: isErrCol ? "var(--bad)" : undefined,
+                          background: isErrCol ? "rgba(239, 68, 68, 0.08)" : undefined,
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="modal-header" style={{ borderTop: "1px solid var(--card-border)", justifyContent: "flex-end", gap: "10px" }}>
+              <button className="secondary" onClick={() => setEditingRow(null)}>Cancel</button>
+              <button className="primary" onClick={handleSaveEdit}>
+                💾 Save & Re-Validate Record
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6. Add Record Modal (CRUD: Create) */}
+      {isAddingRecord && (
+        <div className="modal-overlay" onClick={() => setIsAddingRecord(false)}>
+          <div className="modal-box" style={{ maxWidth: "750px" }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <h3 style={{ margin: 0 }}>➕ Add Record to Ingestion Batch</h3>
+                <span className="sub-meta">Enter new record attributes and validate in real-time</span>
+              </div>
+              <button className="secondary sm" onClick={() => setIsAddingRecord(false)}>✕ Close</button>
+            </div>
+
+            {editingError && (
+              <div className="error" style={{ margin: "12px 18px 0" }}>
+                <strong>Validation Violation:</strong> {editingError}
+              </div>
+            )}
+
+            <div className="modal-body" style={{ maxHeight: "60vh", overflowY: "auto", padding: "16px 20px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                {(fileData?.headers || []).map((col) => (
+                  <div key={col}>
+                    <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "var(--muted)", marginBottom: "4px" }}>
+                      {col}
+                    </label>
+                    <input
+                      type="text"
+                      value={newRecordData[col] ?? ""}
+                      onChange={(e) =>
+                        setNewRecordData({ ...newRecordData, [col]: e.target.value })
+                      }
+                      style={{ width: "100%", padding: "6px 10px", fontSize: "12px" }}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="modal-header" style={{ borderTop: "1px solid var(--card-border)", justifyContent: "flex-end", gap: "10px" }}>
+              <button className="secondary" onClick={() => setIsAddingRecord(false)}>Cancel</button>
+              <button className="primary" onClick={handleSaveAddRecord}>
+                ➕ Add & Validate Record
+              </button>
             </div>
           </div>
         </div>
