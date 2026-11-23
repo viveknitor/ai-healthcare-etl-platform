@@ -208,3 +208,4 @@ Regardless of transformation rules:
 | **Institutional / Business Field** | `EligibilityOfficeId: "OFF01"`, `issubscriber: "Y"`, `medincome: 65000` | Mapped to typed FHIR extension (`extension[N].valueString`, `valueBoolean`, `valueDecimal`) | **0% (Zero Loss)** |
 | **Unknown / Mystery Legacy Column** | `XYZ_LEGACY_CODE_9`, `cust_flag_2` | Mapped to `extension[N].valueString` via 1-click `✨ Map All Remaining Columns as Extensions` | **0% (Zero Loss)** |
 | **Raw Ingest Batch Archive** | Full CSV row | Preserved in Full Audit CSV export, JSON package, and optional Raw Payload Extension | **0% (Zero Loss)** |
+

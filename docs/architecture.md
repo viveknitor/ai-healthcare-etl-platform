@@ -175,4 +175,12 @@ sequenceDiagram
 For complete details on the **HL7 FHIR 80/20 Pareto principle**, official FHIR extension specifications, and how the platform guarantees 100% preservation of proprietary, institutional, and unknown columns without data loss, see:
 - [HL7 FHIR Extensibility & Zero-Data-Loss Architectural Strategy](fhir-extensibility-and-zero-data-loss.md)
 
+---
+
+## 7. Rate Limiting, Throttling & High-Volume Ingestion Pacing
+
+For analysis on Medplum's 50,000-point token bucket rate limiter, root-cause dissection of HTTP 429 `too-many-requests`, and the 4-layer adaptive retry and pacing architecture, see:
+- [HTTP 429 Rate Limiting & Throttling Strategy](http-429-rate-limiting-and-throttling.md)
+
+
 
