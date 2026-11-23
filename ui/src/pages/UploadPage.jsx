@@ -935,6 +935,7 @@ export default function UploadPage() {
       <InspectRecordModal
         activeRecord={activeRecord}
         targetResource={targetResource}
+        mapping={mapping}
         onClose={() => setActiveRecord(null)}
         copyPayload={copyPayload}
         copiedKey={copiedKey}

@@ -155,12 +155,15 @@ def _process_single_record(
         )
 
     if mapping_errs:
+        recon_err = generate_dynamic_reconciliation(row, resource, source_name=dataset_name, target_name="Medplum", mapping=mapping)
         return RecordResult(
             source_id=source_id,
             status="invalid",
             errors=mapping_errs,
             source_record=row,
             target_record=resource,
+            reconciliation_table=recon_err,
+            patient_summary=extract_clinical_summary(resource),
             mapping_details={
                 "delivery_action": "quarantined",
                 "error_category": "transform_syntax",
@@ -174,12 +177,15 @@ def _process_single_record(
     # Validate against official FHIR R4 schema
     val_errors = validate_fhir(resource)
     if val_errors:
+        recon_err = generate_dynamic_reconciliation(row, resource, source_name=dataset_name, target_name="Medplum", mapping=mapping)
         return RecordResult(
             source_id=source_id,
             status="invalid",
             errors=val_errors,
             source_record=row,
             target_record=resource,
+            reconciliation_table=recon_err,
+            patient_summary=extract_clinical_summary(resource),
             mapping_details={
                 "delivery_action": "quarantined",
                 "error_category": "schema_validation",

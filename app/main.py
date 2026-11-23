@@ -131,7 +131,13 @@ def transform(req: TransformRequest):
         resource, errors = apply_mapping(req.mapping, req.payload)
     except MappingNotApproved as e:
         raise HTTPException(409, str(e))
-    recon = generate_dynamic_reconciliation(req.payload, resource, source_name="Input Sample", target_name=req.mapping.target_resource)
+    recon = generate_dynamic_reconciliation(
+        req.payload,
+        resource,
+        source_name="Input Sample",
+        target_name=req.mapping.target_resource,
+        mapping=req.mapping,
+    )
     return {
         "resource": resource,
         "mapping_errors": errors,
