@@ -921,6 +921,64 @@ def test_stream_uploaded_records_scenario_counts():
     assert events[2]["summary"]["counts"]["invalid"] == 1
 
 
+def test_request_with_retry_handles_retry_after_header():
+    """Verify request_with_retry dynamically parses standard Retry-After HTTP headers."""
+    from app.connectors.http import request_with_retry
+
+    calls = 0
+    slept = []
+
+    def handler(req):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(429, headers={"Retry-After": "5"}, text="Too Many Requests")
+        return httpx.Response(200, json={"ok": True})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    res = request_with_retry(client, "GET", "http://test/fhir", retries=2, sleep=slept.append)
+
+    assert res.status_code == 200
+    assert calls == 2
+    assert len(slept) == 1
+    assert abs(slept[0] - 5.5) < 0.1  # 5s + 0.5s safety buffer
+
+
+def test_request_with_retry_handles_medplum_ms_before_next():
+    """Verify request_with_retry parses Medplum's OperationOutcome _msBeforeNext diagnostic."""
+    from app.connectors.http import request_with_retry
+
+    calls = 0
+    slept = []
+    outcome_429 = {
+        "resourceType": "OperationOutcome",
+        "id": "too-many-requests",
+        "issue": [{
+            "severity": "error",
+            "code": "throttled",
+            "diagnostics": json.dumps({"_remainingPoints": 0, "_msBeforeNext": 36022, "limit": 50000})
+        }]
+    }
+
+    def handler(req):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(429, json=outcome_429)
+        return httpx.Response(201, json={"resourceType": "Patient", "id": "p-123"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    res = request_with_retry(client, "PUT", "http://test/fhir/R4/Patient", retries=2, sleep=slept.append)
+
+    assert res.status_code == 201
+    assert res.json()["id"] == "p-123"
+    assert calls == 2
+    assert len(slept) == 1
+    # 36022 ms / 1000 + 0.5s = 36.522s
+    assert abs(slept[0] - 36.522) < 0.1
+
+
+
 
 
 
