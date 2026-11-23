@@ -189,6 +189,14 @@ For analysis on Medplum's 50,000-point token bucket rate limiter, root-cause dis
 For the authoritative specification of the platform's **7 specialized agents** (6 sequential relay agents + 1 self-healing sub-agent), including their exact archetypes, operational task checklists, input/output schemas, and Human-in-the-Loop governance models, see:
 - [Multi-Agent System Architecture & Agent Roster Specification](multi-agent-system-architecture.md)
 
+---
+
+## 9. Native Microsoft Excel Support & Serial Date Handling
+
+For analysis on Microsoft Excel OpenXML date storage mechanics (serial day numbers such as `39216` and `18476`), root-cause dissection of batch quarantine failures, and the 3-layer auto-conversion architecture across the parser, engine, and UI modal, see:
+- [Excel Support Architecture & Serial Date Quarantine Remediation Plan](excel-support-plan.md)
+
+
 
 
 
