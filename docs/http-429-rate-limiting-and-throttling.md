@@ -144,3 +144,4 @@ In the Ingestion Results toolbar (`ui/src/components/wizard/Step4ReconciliationH
 | **Large batch (650+ records)** | Adaptive pacing active | Points consumed within rolling quota |
 | **Throttling test (mock 429)** | Medplum returns 429 with `_msBeforeNext` | Client sleeps required duration and succeeds on retry |
 | **UI Retry** | Manual re-run of failed rows | Promotes failed records to delivered without duplicate creation |
+

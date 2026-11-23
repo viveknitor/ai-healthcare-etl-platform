@@ -182,5 +182,13 @@ For complete details on the **HL7 FHIR 80/20 Pareto principle**, official FHIR e
 For analysis on Medplum's 50,000-point token bucket rate limiter, root-cause dissection of HTTP 429 `too-many-requests`, and the 4-layer adaptive retry and pacing architecture, see:
 - [HTTP 429 Rate Limiting & Throttling Strategy](http-429-rate-limiting-and-throttling.md)
 
+---
+
+## 8. Autonomous Multi-Agent System Architecture & Agent Roster
+
+For the authoritative specification of the platform's **7 specialized agents** (6 sequential relay agents + 1 self-healing sub-agent), including their exact archetypes, operational task checklists, input/output schemas, and Human-in-the-Loop governance models, see:
+- [Multi-Agent System Architecture & Agent Roster Specification](multi-agent-system-architecture.md)
+
+
 
 
