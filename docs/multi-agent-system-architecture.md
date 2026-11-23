@@ -238,3 +238,4 @@ In the operator interface (`ui/src/components/AgentWorkflowVisualizer.jsx`), the
 - [HL7 FHIR Extensibility & Zero-Data-Loss Architectural Strategy](fhir-extensibility-and-zero-data-loss.md)
 - [HTTP 429 Rate Limiting & Throttling Strategy](http-429-rate-limiting-and-throttling.md)
 - [Platform Operations & User Guide](user-guide.md)
+
