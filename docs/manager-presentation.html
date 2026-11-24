@@ -698,7 +698,7 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
         <span>Prev</span>
       </button>
-      <span class="slide-counter" id="slideCounter">Slide 1 / 8</span>
+      <span class="slide-counter" id="slideCounter">Slide 1 / 7</span>
       <button class="btn btn-primary" onclick="nextSlide()" title="Next Slide [→]">
         <span>Next</span>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
@@ -1141,97 +1141,8 @@
       </div>
     </div>
 
-    <!-- ==================== SLIDE 7: QUANTIFIABLE IMPACT & ROI ==================== -->
+    <!-- ==================== SLIDE 7: ROLLOUT & MANAGER Q&A ==================== -->
     <div class="slide" id="slide-7">
-      <span class="eyebrow">Strategic ROI • Management Scorecard</span>
-      <h2 class="title">Business & Clinical Impact Scorecard + ROI Calculator</h2>
-      <p class="subtitle">Direct comparison of operational metrics, cost profiles, delivery velocity, and an interactive savings calculator for leadership.</p>
-
-      <div class="grid-2">
-        <div class="panel">
-          <div class="panel-header">📊 Traditional ETL vs. Our AI Multi-Agent Platform</div>
-          <div class="panel-body">
-            <table>
-              <tr><th>Dimension</th><th>Traditional Manual ETL</th><th>Our AI Platform</th></tr>
-              <tr>
-                <td><strong>Onboarding Time</strong></td>
-                <td>3 to 6 months per feed</td>
-                <td><strong style="color: #34d399;">&lt; 2 minutes</strong></td>
-              </tr>
-              <tr>
-                <td><strong>Engineering Cost</strong></td>
-                <td>$100,000 – $250,000+</td>
-                <td><strong style="color: #34d399;">~$0.0002 AI inference</strong></td>
-              </tr>
-              <tr>
-                <td><strong>Data Loss Risk</strong></td>
-                <td>High (Unmapped fields dropped)</td>
-                <td><strong style="color: #34d399;">0% Loss (FHIR extensions)</strong></td>
-              </tr>
-              <tr>
-                <td><strong>Exception Handling</strong></td>
-                <td>Manual engineering tickets</td>
-                <td><strong style="color: #34d399;">Autonomous Self-Healing (4B)</strong></td>
-              </tr>
-              <tr>
-                <td><strong>Compliance Risk</strong></td>
-                <td>High audit liabilities</td>
-                <td><strong style="color: #34d399;">Human Governance Gate</strong></td>
-              </tr>
-            </table>
-
-            <div class="impact-callout" style="margin-top: 14px;">
-              <div class="impact-title">🏥 Clinical Care Impact</div>
-              <div class="impact-desc">Real-time FHIR availability replaces 30-day claims latency. Clinical staff receive complete patient histories without missing records or duplicate charts.</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-header">💰 Interactive Management ROI Calculator</div>
-          <div class="panel-body">
-            <div class="calc-slider-group">
-              <div class="calc-slider-header">
-                <span>Number of Healthcare Partner Feeds / Year:</span>
-                <span id="calcPartnersVal" style="color: var(--accent-cyan); font-family: var(--font-mono); font-weight: 700;">10 Feeds</span>
-              </div>
-              <input type="range" class="calc-slider" id="calcPartners" min="1" max="50" value="10" oninput="updateRoiCalc()">
-            </div>
-
-            <div class="calc-slider-group">
-              <div class="calc-slider-header">
-                <span>Average Manual Cost per Interface ($):</span>
-                <span id="calcCostVal" style="color: var(--accent-emerald); font-family: var(--font-mono); font-weight: 700;">$150,000</span>
-              </div>
-              <input type="range" class="calc-slider" id="calcCost" min="50000" max="300000" step="10000" value="150000" oninput="updateRoiCalc()">
-            </div>
-
-            <div style="background: rgba(0,0,0,0.4); border: 1px solid var(--bg-card-border); border-radius: 8px; padding: 14px; margin-top: 10px;">
-              <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                <span style="font-size: 11px; color: var(--text-muted);">Traditional Consulting Cost:</span>
-                <span id="calcOldCost" style="font-family: var(--font-mono); font-weight: 700; color: #fb7185;">$1,500,000</span>
-              </div>
-              <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                <span style="font-size: 11px; color: var(--text-muted);">Platform Operation Cost:</span>
-                <span style="font-family: var(--font-mono); font-weight: 700; color: var(--accent-cyan);">&lt; $50 (Cloud Compute)</span>
-              </div>
-              <div style="height: 1px; background: rgba(255,255,255,0.1); margin: 8px 0;"></div>
-              <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-size: 12.5px; font-weight: 700; color: #fff;">Net Annual Budget Savings:</span>
-                <span id="calcSavings" style="font-size: 20px; font-family: var(--font-mono); font-weight: 800; color: #34d399;">$1,499,950</span>
-              </div>
-              <div style="display: flex; justify-content: space-between; margin-top: 6px;">
-                <span style="font-size: 11px; color: var(--text-muted);">Engineering Time Reclaimed:</span>
-                <span id="calcTimeSaved" style="font-family: var(--font-mono); font-weight: 700; color: var(--accent-purple);">30 to 60 Months</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ==================== SLIDE 8: ROLLOUT & MANAGER Q&A ==================== -->
-    <div class="slide" id="slide-8">
       <span class="eyebrow">Enterprise Rollout • Manager Q&A Cheat Sheet</span>
       <h2 class="title">Enterprise Rollout Strategy & Manager Objection Handling</h2>
       <p class="subtitle">Clear answers to executive questions regarding HIPAA privacy, LLM hallucinations, security, and our phased rollout plan.</p>
@@ -1285,6 +1196,57 @@
 
     <!-- ==================== PRESERVED TECHNICAL SLIDES (HIDDEN IN UI) ==================== -->
     <div style="display: none;" id="preserved-technical-archive">
+      <!-- PRESERVED SLIDE: BUSINESS & CLINICAL IMPACT + ROI CALCULATOR -->
+      <div id="preserved-slide-roi-calculator">
+        <span class="eyebrow">Strategic ROI • Management Scorecard</span>
+        <h2 class="title">Business & Clinical Impact Scorecard + ROI Calculator</h2>
+        <p class="subtitle">Direct comparison of operational metrics, cost profiles, delivery velocity, and an interactive savings calculator for leadership.</p>
+
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-header">📊 Traditional ETL vs. Our AI Multi-Agent Platform</div>
+            <div class="panel-body">
+              <table>
+                <tr><th>Dimension</th><th>Traditional Manual ETL</th><th>Our AI Platform</th></tr>
+                <tr><td>Onboarding Time</td><td>3 to 6 months per feed</td><td>&lt; 2 minutes</td></tr>
+                <tr><td>Engineering Cost</td><td>$100,000 – $250,000+</td><td>~$0.0002 AI inference</td></tr>
+                <tr><td>Data Loss Risk</td><td>High (Unmapped fields dropped)</td><td>0% Loss (FHIR extensions)</td></tr>
+                <tr><td>Exception Handling</td><td>Manual engineering tickets</td><td>Autonomous Self-Healing (4B)</td></tr>
+                <tr><td>Compliance Risk</td><td>High audit liabilities</td><td>Human Governance Gate</td></tr>
+              </table>
+              <div class="impact-callout" style="margin-top: 14px;">
+                <div class="impact-title">🏥 Clinical Care Impact</div>
+                <div class="impact-desc">Real-time FHIR availability replaces 30-day claims latency. Clinical staff receive complete patient histories without missing records or duplicate charts.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">💰 Interactive Management ROI Calculator</div>
+            <div class="panel-body">
+              <div class="calc-slider-group">
+                <div class="calc-slider-header">
+                  <span>Number of Healthcare Partner Feeds / Year:</span>
+                  <span id="calcPartnersVal">10 Feeds</span>
+                </div>
+                <input type="range" class="calc-slider" id="calcPartners" min="1" max="50" value="10" oninput="updateRoiCalc()">
+              </div>
+              <div class="calc-slider-group">
+                <div class="calc-slider-header">
+                  <span>Average Manual Cost per Interface ($):</span>
+                  <span id="calcCostVal">$150,000</span>
+                </div>
+                <input type="range" class="calc-slider" id="calcCost" min="50000" max="300000" step="10000" value="150000" oninput="updateRoiCalc()">
+              </div>
+              <div>
+                <div>Traditional Consulting Cost: <span id="calcOldCost">$1,500,000</span></div>
+                <div>Net Annual Budget Savings: <span id="calcSavings">$1,499,950</span></div>
+                <div>Engineering Time Reclaimed: <span id="calcTimeSaved">30 to 60 Months</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
       <!-- PRESERVED SLIDE: HTTP 429 & EXCEL SERIAL DATES -->
       <div id="preserved-slide-edge-cases">
         <span class="eyebrow">Enterprise Resilience • Edge Case Handling</span>
@@ -1382,7 +1344,7 @@
 
   <script>
     let currentSlide = 1;
-    const totalSlides = 8;
+    const totalSlides = 7;
 
     // Slide Titles for Jump Directory
     const slideTitles = [
@@ -1392,7 +1354,6 @@
       "Architectural Breakthroughs",
       "Zero Data Loss Strategy",
       "🚀 Live Interactive Demo",
-      "Business & Clinical Impact",
       "Rollout & Manager Q&A"
     ];
 
@@ -1416,10 +1377,7 @@
       // Slide 6 (Demo)
       `<strong>What to Say to Your Manager:</strong> "Let me show you a live demonstration. Watch as I choose Scenario 1. When I click 'Run Live Simulation', notice Agent 1 extracting the 28 columns, Agent 2 synthesizing the mapping rules in 3.5 seconds, Agent 3 pausing for operator review, Agent 4 validating, and Agent 5 streaming conditional upserts into Medplum PostgreSQL. You can see the raw input on the left and the certified FHIR R4 resource on the right."`,
 
-      // Slide 7
-      `<strong>What to Say to Your Manager:</strong> "Look at our interactive ROI calculator. If our organization onboards just 10 data partners a year at an industry average of $150,000 per custom interface, that's $1.5 million in consulting fees and 3 to 5 years of engineering effort. Our platform achieves the same onboarding in minutes at less than $50 in cloud compute, generating an estimated $1.49M in net annual budget savings."`,
-
-      // Slide 8
+      // Slide 7 (Rollout)
       `<strong>What to Say to Your Manager:</strong> "To wrap up: No PHI is ever sent to public models. We have a clear 3-phase rollout plan starting with batch file ingestion today and expanding to live EHR streams and bi-directional Epic/Cerner exchange. I'm ready to answer any technical, security, or compliance questions you have."`
     ];
 
@@ -1777,7 +1735,7 @@
         toggleJumpModal();
       } else if (e.key === 'Escape') {
         closeJumpModal();
-      } else if (e.key >= '1' && e.key <= '8') {
+      } else if (e.key >= '1' && e.key <= '7') {
         goToSlide(parseInt(e.key, 10));
       }
     });
