@@ -698,7 +698,7 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
         <span>Prev</span>
       </button>
-      <span class="slide-counter" id="slideCounter">Slide 1 / 7</span>
+      <span class="slide-counter" id="slideCounter">Slide 1 / 6</span>
       <button class="btn btn-primary" onclick="nextSlide()" title="Next Slide [→]">
         <span>Next</span>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
@@ -1046,103 +1046,8 @@
       </div>
     </div>
 
-    <!-- ==================== SLIDE 6: INTERACTIVE LIVE DEMO SIMULATOR ==================== -->
+    <!-- ==================== SLIDE 6: ROLLOUT & MANAGER Q&A ==================== -->
     <div class="slide" id="slide-6">
-      <span class="eyebrow">Live Demonstration • Real-Time Pipeline Simulator</span>
-      <h2 class="title">Interactive Pipeline Demo: Watch the 7 Agents in Action</h2>
-      <p class="subtitle">Select a real healthcare data scenario below and execute the pipeline live. Observe each agent inspect, reason, validate, self-heal, stream, and audit in real time.</p>
-
-      <div class="sim-container">
-        <div class="sim-header">
-          <div class="sim-controls">
-            <span style="font-size: 12px; font-weight: 700; color: #fff;">Test Scenario:</span>
-            <select class="sim-select" id="simScenarioSelect" onchange="onScenarioChange()">
-              <option value="member_csv">1. Enterprise Payer Member Roster (28 columns, CSV)</option>
-              <option value="excel_serial">2. Microsoft Excel OpenXML Workbook (Serial Dates 39216, 18476)</option>
-              <option value="schema_healing">3. Broken Schema Error with Autonomous Self-Healing (Agent 4B)</option>
-              <option value="rate_limited">4. High-Volume Batch with HTTP 429 Rate Limiting Defense</option>
-            </select>
-          </div>
-
-          <div style="display: flex; gap: 8px;">
-            <button class="btn btn-emerald" id="simStartBtn" onclick="runSimulatedPipeline()">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-              <span>Run Live Simulation</span>
-            </button>
-            <button class="btn" onclick="resetSimulatedPipeline()">Reset</button>
-          </div>
-        </div>
-
-        <!-- Visual Multi-Agent Flow -->
-        <div class="sim-agents-flow">
-          <div class="sim-connector-line"></div>
-          <div class="sim-connector-progress" id="simConnectorProgress"></div>
-
-          <div class="sim-agent-node" id="simNode1">
-            <div class="sim-agent-circle">🤖</div>
-            <div class="sim-agent-name">Agent 1</div>
-            <div class="sim-agent-role">DataScout</div>
-          </div>
-
-          <div class="sim-agent-node" id="simNode2">
-            <div class="sim-agent-circle">🧠</div>
-            <div class="sim-agent-name">Agent 2</div>
-            <div class="sim-agent-role">AI Architect</div>
-          </div>
-
-          <div class="sim-agent-node" id="simNode3">
-            <div class="sim-agent-circle">👤</div>
-            <div class="sim-agent-name">Agent 3</div>
-            <div class="sim-agent-role">Compliance</div>
-          </div>
-
-          <div class="sim-agent-node" id="simNode4">
-            <div class="sim-agent-circle">🛡️</div>
-            <div class="sim-agent-name">Agent 4</div>
-            <div class="sim-agent-role">Sentinel</div>
-          </div>
-
-          <div class="sim-agent-node" id="simNode4b" style="display: none;">
-            <div class="sim-agent-circle">🩹</div>
-            <div class="sim-agent-name">Agent 4B</div>
-            <div class="sim-agent-role">Self-Healer</div>
-          </div>
-
-          <div class="sim-agent-node" id="simNode5">
-            <div class="sim-agent-circle">⚡</div>
-            <div class="sim-agent-name">Agent 5</div>
-            <div class="sim-agent-role">Dispatcher</div>
-          </div>
-
-          <div class="sim-agent-node" id="simNode6">
-            <div class="sim-agent-circle">📊</div>
-            <div class="sim-agent-name">Agent 6</div>
-            <div class="sim-agent-role">Auditor</div>
-          </div>
-        </div>
-
-        <!-- Live Terminal Stream -->
-        <div class="sim-terminal" id="simTerminal">
-          <div>[Ready] Select scenario above and click "Run Live Simulation" to begin simulation.</div>
-        </div>
-
-        <!-- Interactive Data Inspection Tabs -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px;">
-          <div style="background: rgba(0,0,0,0.5); border: 1px solid var(--bg-card-border); border-radius: 6px; padding: 10px;">
-            <div style="font-size: 11px; font-weight: 700; color: var(--accent-cyan); margin-bottom: 6px;">📥 Raw Input Record Sample</div>
-            <pre id="simRawInput" style="font-family: var(--font-mono); font-size: 10.5px; color: #cbd5e1; white-space: pre-wrap; max-height: 100px; overflow-y: auto;">{"memid": "MEM00000001", "fullname": "Johnathan Doe", "dob": "1985-06-15", "sex": "M", "isvip": "Y", "medincome": 72500}</pre>
-          </div>
-
-          <div style="background: rgba(0,0,0,0.5); border: 1px solid var(--bg-card-border); border-radius: 6px; padding: 10px;">
-            <div style="font-size: 11px; font-weight: 700; color: var(--accent-emerald); margin-bottom: 6px;">📤 Generated HL7 FHIR R4 (Medplum Storage Target)</div>
-            <pre id="simFhirOutput" style="font-family: var(--font-mono); font-size: 10.5px; color: #34d399; white-space: pre-wrap; max-height: 100px; overflow-y: auto;">{"resourceType": "Patient", "id": "medplum-patient-841f", "name": [{"text": "Johnathan Doe"}], "birthDate": "1985-06-15", "gender": "male", "extension": [{"url": "http://example.org/fhir/StructureDefinition/isvip", "valueBoolean": true}, {"url": "http://example.org/fhir/StructureDefinition/medincome", "valueDecimal": 72500}]}</pre>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ==================== SLIDE 7: ROLLOUT & MANAGER Q&A ==================== -->
-    <div class="slide" id="slide-7">
       <span class="eyebrow">Enterprise Rollout • Manager Q&A Cheat Sheet</span>
       <h2 class="title">Enterprise Rollout Strategy & Manager Objection Handling</h2>
       <p class="subtitle">Clear answers to executive questions regarding HIPAA privacy, LLM hallucinations, security, and our phased rollout plan.</p>
@@ -1196,6 +1101,45 @@
 
     <!-- ==================== PRESERVED TECHNICAL SLIDES (HIDDEN IN UI) ==================== -->
     <div style="display: none;" id="preserved-technical-archive">
+      <!-- PRESERVED SLIDE: INTERACTIVE PIPELINE DEMO SIMULATOR -->
+      <div id="preserved-slide-pipeline-simulator">
+        <span class="eyebrow">Live Demonstration • Real-Time Pipeline Simulator</span>
+        <h2 class="title">Interactive Pipeline Demo: Watch the 7 Agents in Action</h2>
+        <p class="subtitle">Select a real healthcare data scenario below and execute the pipeline live.</p>
+        <div class="sim-container">
+          <div class="sim-header">
+            <div class="sim-controls">
+              <span>Test Scenario:</span>
+              <select class="sim-select" id="simScenarioSelect" onchange="onScenarioChange()">
+                <option value="member_csv">1. Enterprise Payer Member Roster (28 columns, CSV)</option>
+                <option value="excel_serial">2. Microsoft Excel OpenXML Workbook (Serial Dates 39216, 18476)</option>
+                <option value="schema_healing">3. Broken Schema Error with Autonomous Self-Healing (Agent 4B)</option>
+                <option value="rate_limited">4. High-Volume Batch with HTTP 429 Rate Limiting Defense</option>
+              </select>
+            </div>
+            <div>
+              <button class="btn btn-emerald" id="simStartBtn" onclick="runSimulatedPipeline()">Run Live Simulation</button>
+              <button class="btn" onclick="resetSimulatedPipeline()">Reset</button>
+            </div>
+          </div>
+          <div class="sim-agents-flow">
+            <div class="sim-connector-line"></div>
+            <div class="sim-connector-progress" id="simConnectorProgress"></div>
+            <div class="sim-agent-node" id="simNode1"><div class="sim-agent-circle">🤖</div><div>Agent 1</div></div>
+            <div class="sim-agent-node" id="simNode2"><div class="sim-agent-circle">🧠</div><div>Agent 2</div></div>
+            <div class="sim-agent-node" id="simNode3"><div class="sim-agent-circle">👤</div><div>Agent 3</div></div>
+            <div class="sim-agent-node" id="simNode4"><div class="sim-agent-circle">🛡️</div><div>Agent 4</div></div>
+            <div class="sim-agent-node" id="simNode4b" style="display: none;"><div class="sim-agent-circle">🩹</div><div>Agent 4B</div></div>
+            <div class="sim-agent-node" id="simNode5"><div class="sim-agent-circle">⚡</div><div>Agent 5</div></div>
+            <div class="sim-agent-node" id="simNode6"><div class="sim-agent-circle">📊</div><div>Agent 6</div></div>
+          </div>
+          <div class="sim-terminal" id="simTerminal"><div>[Ready] Select scenario above and click "Run Live Simulation".</div></div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <pre id="simRawInput">{"memid": "MEM00000001", "fullname": "Johnathan Doe"}</pre>
+            <pre id="simFhirOutput">{"resourceType": "Patient", "id": "medplum-patient-841f"}</pre>
+          </div>
+        </div>
+      </div>
       <!-- PRESERVED SLIDE: BUSINESS & CLINICAL IMPACT + ROI CALCULATOR -->
       <div id="preserved-slide-roi-calculator">
         <span class="eyebrow">Strategic ROI • Management Scorecard</span>
@@ -1344,7 +1288,7 @@
 
   <script>
     let currentSlide = 1;
-    const totalSlides = 7;
+    const totalSlides = 6;
 
     // Slide Titles for Jump Directory
     const slideTitles = [
@@ -1353,7 +1297,6 @@
       "The 7 Specialized Agents",
       "Architectural Breakthroughs",
       "Zero Data Loss Strategy",
-      "🚀 Live Interactive Demo",
       "Rollout & Manager Q&A"
     ];
 
@@ -1374,10 +1317,7 @@
       // Slide 5
       `<strong>What to Say to Your Manager:</strong> "Traditional ETL tools secretly drop columns that don't match standard FHIR. That is a massive compliance and audit liability. In a standard 28-column payer dataset, 14 fields map to core FHIR attributes (name, DOB, gender). The remaining 14 are proprietary or audit fields (like VIP status, median income, or last update ID). Our platform automatically packages those 14 fields into typed FHIR extensions, delivering 100% Zero Data Loss."`,
 
-      // Slide 6 (Demo)
-      `<strong>What to Say to Your Manager:</strong> "Let me show you a live demonstration. Watch as I choose Scenario 1. When I click 'Run Live Simulation', notice Agent 1 extracting the 28 columns, Agent 2 synthesizing the mapping rules in 3.5 seconds, Agent 3 pausing for operator review, Agent 4 validating, and Agent 5 streaming conditional upserts into Medplum PostgreSQL. You can see the raw input on the left and the certified FHIR R4 resource on the right."`,
-
-      // Slide 7 (Rollout)
+      // Slide 6 (Rollout)
       `<strong>What to Say to Your Manager:</strong> "To wrap up: No PHI is ever sent to public models. We have a clear 3-phase rollout plan starting with batch file ingestion today and expanding to live EHR streams and bi-directional Epic/Cerner exchange. I'm ready to answer any technical, security, or compliance questions you have."`
     ];
 
@@ -1735,7 +1675,7 @@
         toggleJumpModal();
       } else if (e.key === 'Escape') {
         closeJumpModal();
-      } else if (e.key >= '1' && e.key <= '7') {
+      } else if (e.key >= '1' && e.key <= '6') {
         goToSlide(parseInt(e.key, 10));
       }
     });
