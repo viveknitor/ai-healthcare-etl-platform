@@ -203,6 +203,14 @@ For analysis on Microsoft Excel OpenXML date storage mechanics (serial day numbe
 For detailed technical analysis on why the AI Architect maps core clinical attributes automatically (e.g. 14 core fields) while surfacing proprietary and database audit columns as optional extensions via the **`✨ Map All Remaining Columns as Extensions`** action, see:
 - [Field Coverage & Extension Strategy: Core Mappings vs. Zero-Data-Loss Extensions](field-coverage-and-extension-strategy.md)
 
+---
+
+## 11. Interactive Technical Architecture Presentation
+
+For a self-contained, slide-based technical presentation covering the entire system topology, multi-agent relay, closed-loop self-healing, rate-limiting resilience, OpenXML Excel date handling, and reconciliation provenance, open:
+- [Interactive Technical Architecture Presentation (HTML Slide Deck)](technical-presentation.html)
+
+
 
 
 
