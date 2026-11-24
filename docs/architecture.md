@@ -196,6 +196,14 @@ For the authoritative specification of the platform's **7 specialized agents** (
 For analysis on Microsoft Excel OpenXML date storage mechanics (serial day numbers such as `39216` and `18476`), root-cause dissection of batch quarantine failures, and the 3-layer auto-conversion architecture across the parser, engine, and UI modal, see:
 - [Excel Support Architecture & Serial Date Quarantine Remediation Plan](excel-support-plan.md)
 
+---
+
+## 10. Field Coverage & Extension Strategy: Core Mappings vs. Extensions
+
+For detailed technical analysis on why the AI Architect maps core clinical attributes automatically (e.g. 14 core fields) while surfacing proprietary and database audit columns as optional extensions via the **`✨ Map All Remaining Columns as Extensions`** action, see:
+- [Field Coverage & Extension Strategy: Core Mappings vs. Zero-Data-Loss Extensions](field-coverage-and-extension-strategy.md)
+
+
 
 
 
