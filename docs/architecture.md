@@ -175,4 +175,44 @@ sequenceDiagram
 For complete details on the **HL7 FHIR 80/20 Pareto principle**, official FHIR extension specifications, and how the platform guarantees 100% preservation of proprietary, institutional, and unknown columns without data loss, see:
 - [HL7 FHIR Extensibility & Zero-Data-Loss Architectural Strategy](fhir-extensibility-and-zero-data-loss.md)
 
+---
+
+## 7. Rate Limiting, Throttling & High-Volume Ingestion Pacing
+
+For analysis on Medplum's 50,000-point token bucket rate limiter, root-cause dissection of HTTP 429 `too-many-requests`, and the 4-layer adaptive retry and pacing architecture, see:
+- [HTTP 429 Rate Limiting & Throttling Strategy](http-429-rate-limiting-and-throttling.md)
+
+---
+
+## 8. Autonomous Multi-Agent System Architecture & Agent Roster
+
+For the authoritative specification of the platform's **7 specialized agents** (6 sequential relay agents + 1 self-healing sub-agent), including their exact archetypes, operational task checklists, input/output schemas, and Human-in-the-Loop governance models, see:
+- [Multi-Agent System Architecture & Agent Roster Specification](multi-agent-system-architecture.md)
+
+---
+
+## 9. Native Microsoft Excel Support & Serial Date Handling
+
+For analysis on Microsoft Excel OpenXML date storage mechanics (serial day numbers such as `39216` and `18476`), root-cause dissection of batch quarantine failures, and the 3-layer auto-conversion architecture across the parser, engine, and UI modal, see:
+- [Excel Support Architecture & Serial Date Quarantine Remediation Plan](excel-support-plan.md)
+
+---
+
+## 10. Field Coverage & Extension Strategy: Core Mappings vs. Extensions
+
+For detailed technical analysis on why the AI Architect maps core clinical attributes automatically (e.g. 14 core fields) while surfacing proprietary and database audit columns as optional extensions via the **`✨ Map All Remaining Columns as Extensions`** action, see:
+- [Field Coverage & Extension Strategy: Core Mappings vs. Zero-Data-Loss Extensions](field-coverage-and-extension-strategy.md)
+
+---
+
+## 11. Interactive Technical Architecture Presentation
+
+For a self-contained, slide-based technical presentation covering the entire system topology, multi-agent relay, closed-loop self-healing, rate-limiting resilience, OpenXML Excel date handling, and reconciliation provenance, open:
+- [Interactive Technical Architecture Presentation (HTML Slide Deck)](technical-presentation.html)
+
+
+
+
+
+
 

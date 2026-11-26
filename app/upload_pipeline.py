@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import time
 import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import asdict
@@ -269,15 +270,19 @@ def ingest_uploaded_records(
     mapping: MappingConfig,
     dataset_name: str = "upload",
     dry_run: bool = True,
+    pacing_delay_ms: float = 12.0,
 ) -> dict:
     """Transforms and ingests rows into FHIR resources via an approved mapping,
-    delivering directly to Medplum with dynamic reconciliation tracking."""
+    delivering directly to Medplum with dynamic reconciliation tracking and adaptive pacing."""
     system = f"urn:source:{dataset_name.lower().replace(' ', '-')}"
     results: list[RecordResult] = []
+    should_pace = (not dry_run) and (medplum is not None) and (len(rows) > 200) and (pacing_delay_ms > 0)
 
     for i, row in enumerate(rows):
         res = _process_single_record(i, row, mapping, medplum, dataset_name, dry_run, system)
         results.append(res)
+        if should_pace and i < len(rows) - 1:
+            time.sleep(pacing_delay_ms / 1000.0)
 
     counts: dict[str, int] = {}
     created_count = 0
@@ -304,10 +309,12 @@ def stream_uploaded_records(
     mapping: MappingConfig,
     dataset_name: str = "upload",
     dry_run: bool = True,
+    pacing_delay_ms: float = 12.0,
 ):
-    """Yields progress events row-by-row via Server-Sent Events (SSE)."""
+    """Yields progress events row-by-row via Server-Sent Events (SSE) with adaptive micro-pacing for large batches."""
     system = f"urn:source:{dataset_name.lower().replace(' ', '-')}"
     counts = {"delivered": 0, "dry_run": 0, "invalid": 0, "failed": 0, "created": 0, "updated": 0}
+    should_pace = (not dry_run) and (medplum is not None) and (len(rows) > 200) and (pacing_delay_ms > 0)
 
     for i, row in enumerate(rows):
         res = _process_single_record(i, row, mapping, medplum, dataset_name, dry_run, system)
@@ -325,6 +332,9 @@ def stream_uploaded_records(
             "result": asdict(res),
             "current_counts": dict(counts),
         }
+
+        if should_pace and i < len(rows) - 1:
+            time.sleep(pacing_delay_ms / 1000.0)
 
     yield {
         "type": "complete",
