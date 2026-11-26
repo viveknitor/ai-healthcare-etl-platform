@@ -11,6 +11,7 @@ from .logging_setup import get_logger
 from .mapping.engine import apply_mapping
 from .mapping.models import MappingConfig
 from .pipeline import RecordResult, extract_clinical_summary, generate_dynamic_reconciliation
+from .telemetry import telemetry
 from .validation import validate_fhir
 
 log = get_logger("upload_pipeline")
@@ -264,6 +265,28 @@ def _process_single_record(
         )
 
 
+def _record_upload_telemetry(
+    counts: dict[str, int],
+    total: int,
+    dry_run: bool,
+    medplum: MedplumClient | None,
+    t_start: float,
+    source: str,
+) -> None:
+    if total <= 0:
+        return
+    elapsed = max(0.001, time.perf_counter() - t_start)
+    telemetry.record_run(
+        total=total,
+        valid=counts.get("delivered", 0) + counts.get("dry_run", 0),
+        invalid=counts.get("invalid", 0) + counts.get("failed", 0),
+        delivered=counts.get("delivered", 0),
+        dry_run=dry_run or medplum is None,
+        duration_sec=elapsed,
+        source=source,
+    )
+
+
 def ingest_uploaded_records(
     medplum: MedplumClient | None,
     rows: list[dict],
@@ -274,6 +297,7 @@ def ingest_uploaded_records(
 ) -> dict:
     """Transforms and ingests rows into FHIR resources via an approved mapping,
     delivering directly to Medplum with dynamic reconciliation tracking and adaptive pacing."""
+    t_start = time.perf_counter()
     system = f"urn:source:{dataset_name.lower().replace(' ', '-')}"
     results: list[RecordResult] = []
     should_pace = (not dry_run) and (medplum is not None) and (len(rows) > 200) and (pacing_delay_ms > 0)
@@ -297,6 +321,8 @@ def ingest_uploaded_records(
     counts["created"] = created_count
     counts["updated"] = updated_count
 
+    _record_upload_telemetry(counts, len(results), dry_run, medplum, t_start, f"upload:{dataset_name}")
+
     return {
         "summary": {"total": len(results), "counts": counts},
         "results": [asdict(r) for r in results],
@@ -312,35 +338,41 @@ def stream_uploaded_records(
     pacing_delay_ms: float = 12.0,
 ):
     """Yields progress events row-by-row via Server-Sent Events (SSE) with adaptive micro-pacing for large batches."""
+    t_start = time.perf_counter()
     system = f"urn:source:{dataset_name.lower().replace(' ', '-')}"
     counts = {"delivered": 0, "dry_run": 0, "invalid": 0, "failed": 0, "created": 0, "updated": 0}
     should_pace = (not dry_run) and (medplum is not None) and (len(rows) > 200) and (pacing_delay_ms > 0)
+    processed = 0
 
-    for i, row in enumerate(rows):
-        res = _process_single_record(i, row, mapping, medplum, dataset_name, dry_run, system)
-        counts[res.status] = counts.get(res.status, 0) + 1
-        act = (res.mapping_details or {}).get("delivery_action")
-        if act == "created":
-            counts["created"] = counts.get("created", 0) + 1
-        elif act == "updated":
-            counts["updated"] = counts.get("updated", 0) + 1
+    try:
+        for i, row in enumerate(rows):
+            res = _process_single_record(i, row, mapping, medplum, dataset_name, dry_run, system)
+            processed += 1
+            counts[res.status] = counts.get(res.status, 0) + 1
+            act = (res.mapping_details or {}).get("delivery_action")
+            if act == "created":
+                counts["created"] = counts.get("created", 0) + 1
+            elif act == "updated":
+                counts["updated"] = counts.get("updated", 0) + 1
+
+            yield {
+                "type": "record",
+                "index": i + 1,
+                "total": len(rows),
+                "result": asdict(res),
+                "current_counts": dict(counts),
+            }
+
+            if should_pace and i < len(rows) - 1:
+                time.sleep(pacing_delay_ms / 1000.0)
 
         yield {
-            "type": "record",
-            "index": i + 1,
-            "total": len(rows),
-            "result": asdict(res),
-            "current_counts": dict(counts),
+            "type": "complete",
+            "summary": {
+                "total": len(rows),
+                "counts": dict(counts),
+            },
         }
-
-        if should_pace and i < len(rows) - 1:
-            time.sleep(pacing_delay_ms / 1000.0)
-
-    yield {
-        "type": "complete",
-        "summary": {
-            "total": len(rows),
-            "counts": dict(counts),
-        },
-    }
+    finally:
+        _record_upload_telemetry(counts, processed, dry_run, medplum, t_start, f"stream:{dataset_name}")
 

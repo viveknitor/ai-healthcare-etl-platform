@@ -1,12 +1,27 @@
 import React from "react";
 
-export default function TopHeader({ activeTab, online, currentDataset, recordCounts }) {
+export default function TopHeader({ activeTab, online, infra, currentDataset, recordCounts }) {
   const titles = {
     overview: "Executive Operations Dashboard",
     upload: "Direct File Ingestion Hub",
     pipeline: "FHIR Server-to-Server Live Sync",
     mapping: "Autonomous AI Mapping Studio",
   };
+
+  const medplum = infra?.medplum;
+  const medplumStatus = medplum?.status;
+  const medplumDot =
+    medplumStatus === "ok"
+      ? "ok"
+      : medplumStatus === "degraded"
+      ? "warn"
+      : medplumStatus === "offline" || online === false
+      ? "bad"
+      : "";
+  const medplumPort = medplum?.port ?? 8103;
+  const medplumTitle = medplum
+    ? `Medplum ${medplum.version || "FHIR R4"} (${medplumStatus})${medplum.latency_ms != null ? ` • ${medplum.latency_ms}ms` : ""}`
+    : "Target FHIR R4 Repository";
 
   return (
     <header className="app-top-header">
@@ -38,9 +53,13 @@ export default function TopHeader({ activeTab, online, currentDataset, recordCou
           <span>{online === null ? "Connecting…" : online ? "FastAPI Core :8000" : "FastAPI Offline"}</span>
         </div>
 
-        <div className="status-pill" title="Target FHIR R4 Repository">
-          <span className="status-dot ok" />
-          <span>Medplum :8103</span>
+        <div className="status-pill" title={medplumTitle}>
+          <span className={`status-dot ${medplumDot}`} />
+          <span>
+            {medplumStatus === "offline"
+              ? `Medplum :${medplumPort} Offline`
+              : `Medplum :${medplumPort}`}
+          </span>
         </div>
 
         <div className="environment-pill" title="Active Environment">
@@ -51,4 +70,3 @@ export default function TopHeader({ activeTab, online, currentDataset, recordCou
     </header>
   );
 }
-

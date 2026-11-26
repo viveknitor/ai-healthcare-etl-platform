@@ -176,6 +176,11 @@ body {
   box-shadow: 0 0 8px var(--ok);
 }
 
+.status-dot.warn {
+  background: var(--warn);
+  box-shadow: 0 0 8px var(--warn);
+}
+
 .status-dot.bad {
   background: var(--bad);
   box-shadow: 0 0 8px var(--bad);
@@ -1860,5 +1865,18 @@ pre {
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: var(--text-muted);
   font-weight: 600;
+}
+
+/* Completed Medplum Delivery Button State (Upload Wizard Steps 3 & 4) */
+button.delivered-complete,
+button.delivered-complete:disabled,
+button.delivered-complete:hover {
+  opacity: 1;
+  cursor: default;
+  transform: none;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.28) 100%);
+  border-color: rgba(52, 211, 153, 0.65);
+  color: #6ee7b7;
+  box-shadow: 0 0 18px rgba(16, 185, 129, 0.25);
 }
 

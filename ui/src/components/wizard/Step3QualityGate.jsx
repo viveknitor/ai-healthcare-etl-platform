@@ -15,10 +15,31 @@ export default function Step3QualityGate({
   onViewInvalid,
 }) {
   const invalidCount = report?.summary?.counts?.invalid || 0;
+  const failedCount = report?.summary?.counts?.failed || 0;
+  const attentionCount = invalidCount + failedCount;
   const totalCount = report?.summary?.total || fileData?.total_rows || 0;
-  const validCount = Math.max(0, totalCount - invalidCount);
+  const pendingValidCount = report?.summary?.counts?.dry_run || 0;
+  const deliveredCount = report?.summary?.counts?.delivered || 0;
+  const isDeliveredComplete = deliveredCount > 0 && pendingValidCount === 0;
+  const canDeliver = pendingValidCount > 0;
+  const validCount = pendingValidCount > 0 ? pendingValidCount : Math.max(0, totalCount - attentionCount);
   const hasValidationErrors = invalidCount > 0;
   const is100PercentValid = (isValidated || !!report) && invalidCount === 0;
+
+  let deliverLabel = "⚡ Ingest Validated (0)";
+  if (busy === "ingest") {
+    deliverLabel = "⚡ Ingesting to Medplum in Progress…";
+  } else if (pendingValidCount > 0 && deliveredCount > 0) {
+    deliverLabel = `⚡ Ingest ${pendingValidCount} Pending to Medplum`;
+  } else if (pendingValidCount > 0 && attentionCount > 0) {
+    deliverLabel = `⚡ Ingest Validated (${pendingValidCount}) (Quarantine ${attentionCount})`;
+  } else if (pendingValidCount > 0) {
+    deliverLabel = `⚡ Ingest All (${pendingValidCount}) to Medplum`;
+  } else if (isDeliveredComplete && attentionCount > 0) {
+    deliverLabel = `✓ Delivered ${deliveredCount} to Medplum (${attentionCount} Excluded)`;
+  } else if (isDeliveredComplete) {
+    deliverLabel = `✓ Delivered All (${deliveredCount}) to Medplum`;
+  }
 
   return (
     <div className="wizard-step-pane">
@@ -43,20 +64,28 @@ export default function Step3QualityGate({
 
           {report && onInitiateDelivery && (
             <button
-              className="primary"
+              className={`primary ${isDeliveredComplete && busy !== "ingest" ? "delivered-complete" : ""}`}
               onClick={onInitiateDelivery}
-              disabled={!!busy || validCount === 0}
+              disabled={!!busy || !canDeliver}
+              title={
+                isDeliveredComplete
+                  ? `All ${deliveredCount} valid records are delivered to Medplum. Re-validate schema or edit/add a record in Step 4 to sync again.`
+                  : "Stream validated records to Medplum"
+              }
               style={{
                 fontWeight: 700,
-                background: invalidCount === 0
-                  ? "linear-gradient(135deg, #10b981 0%, #059669 100%)"
-                  : "linear-gradient(135deg, #10b981 0%, #047857 100%)",
-                boxShadow: "0 4px 14px rgba(16, 185, 129, 0.35)",
+                ...(canDeliver && !busy
+                  ? {
+                      background:
+                        attentionCount === 0
+                          ? "linear-gradient(135deg, #10b981 0%, #059669 100%)"
+                          : "linear-gradient(135deg, #10b981 0%, #047857 100%)",
+                      boxShadow: "0 4px 14px rgba(16, 185, 129, 0.35)",
+                    }
+                  : {}),
               }}
             >
-              {invalidCount > 0
-                ? `⚡ Ingest Validated (${validCount}) (Quarantine ${invalidCount})`
-                : `⚡ Ingest All (${validCount}) to Medplum`}
+              {deliverLabel}
             </button>
           )}
         </div>
@@ -320,12 +349,16 @@ export default function Step3QualityGate({
         <div>
           {hasValidationErrors && (
             <span style={{ fontSize: "12px", color: "#fcd34d" }}>
-              ⚠️ {validCount} validated records ready for Medplum. {invalidCount} quarantined records will be safely held in review.
+              {isDeliveredComplete
+                ? `✓ ${deliveredCount} valid records delivered to Medplum. ${invalidCount} quarantined records will remain safely held in review.`
+                : `⚠️ ${validCount} validated records ready for Medplum. ${invalidCount} quarantined records will be safely held in review.`}
             </span>
           )}
           {is100PercentValid && (
             <span style={{ fontSize: "12px", color: "var(--ok)" }}>
-              ✓ All {totalCount} records certified and ready for live Medplum delivery.
+              {isDeliveredComplete
+                ? `✓ All ${deliveredCount} records delivered to Medplum.`
+                : `✓ All ${totalCount} records certified and ready for live Medplum delivery.`}
             </span>
           )}
         </div>

@@ -7,7 +7,36 @@ export const NAV_ITEMS = [
   { id: "mapping", label: "AI Mapping Studio", icon: "✨", badge: "Gemini", sub: "Autonomous Schema Contracts" },
 ];
 
-export default function SidebarNav({ activeTab, onSelectTab, isCollapsed, onToggleCollapse }) {
+export default function SidebarNav({ activeTab, onSelectTab, isCollapsed, onToggleCollapse, infra }) {
+  const medplumStatus = infra?.medplum?.status;
+  const medplumPort = infra?.medplum?.port ?? 8103;
+  const medplumDot =
+    medplumStatus === "ok"
+      ? "ok"
+      : medplumStatus === "degraded"
+      ? "warn"
+      : medplumStatus === "offline"
+      ? "bad"
+      : "";
+  const medplumLabel =
+    medplumStatus === "ok"
+      ? "Active"
+      : medplumStatus === "degraded"
+      ? "Degraded"
+      : medplumStatus === "offline"
+      ? "Offline"
+      : "Checking…";
+
+  const geminiStatus = infra?.gemini?.status;
+  const geminiModel = infra?.gemini?.model || "gemini-flash-lite-latest";
+  const geminiActive = geminiStatus === "active";
+  const geminiLabel =
+    geminiStatus === "active"
+      ? "AI Ready"
+      : geminiStatus === "missing_key"
+      ? "No Key"
+      : "Checking…";
+
   return (
     <aside className={`app-sidebar ${isCollapsed ? "collapsed" : ""}`}>
       {/* Brand Header */}
@@ -53,14 +82,17 @@ export default function SidebarNav({ activeTab, onSelectTab, isCollapsed, onTogg
         {!isCollapsed && (
           <div className="sidebar-health-summary">
             <div className="health-row">
-              <span className="status-dot ok" />
-              <span className="health-label">Medplum :8103</span>
-              <span className="health-val">Active</span>
+              <span className={`status-dot ${medplumDot}`} />
+              <span className="health-label">Medplum :{medplumPort}</span>
+              <span className="health-val">{medplumLabel}</span>
             </div>
-            <div className="health-row">
-              <span className="status-dot ok" style={{ background: "#c084fc", boxShadow: "0 0 6px #c084fc" }} />
-              <span className="health-label">Gemini 2.5 Flash</span>
-              <span className="health-val">AI Ready</span>
+            <div className="health-row" title={`Model: ${geminiModel}`}>
+              <span
+                className={`status-dot ${geminiActive ? "ok" : geminiStatus === "missing_key" ? "bad" : ""}`}
+                style={geminiActive ? { background: "#c084fc", boxShadow: "0 0 6px #c084fc" } : undefined}
+              />
+              <span className="health-label">Gemini Flash</span>
+              <span className="health-val">{geminiLabel}</span>
             </div>
           </div>
         )}
@@ -76,4 +108,3 @@ export default function SidebarNav({ activeTab, onSelectTab, isCollapsed, onTogg
     </aside>
   );
 }
-

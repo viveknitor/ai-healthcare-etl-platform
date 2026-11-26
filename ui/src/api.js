@@ -13,6 +13,11 @@ async function call(path, body) {
 
 export const api = {
   health: () => call("/health"),
+  getDashboardStats: () => call("/stats/overview"),
+  getInfrastructureStatus: (refresh = false) =>
+    call(`/stats/infrastructure${refresh ? "?refresh=true" : ""}`),
+  resetDashboardStats: (baseline = true) =>
+    call(`/stats/reset?baseline=${baseline}`, {}),
   runPipeline: (count, dry_run, offset = 0, resource_type = "Patient") =>
     call("/pipelines/hapi-to-medplum", { count, dry_run, offset, resource_type }),
   suggestMapping: (sample, target_resource) => call("/mappings/suggest", { sample, target_resource }),

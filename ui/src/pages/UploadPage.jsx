@@ -254,7 +254,19 @@ export default function UploadPage() {
     setIsDelivered(false);
   };
 
+  // Compute Scenario Counts
+  const scenarioCounts = {
+    ALL: report?.results?.length || 0,
+    delivered: (report?.results || []).filter((r) => r.status === "delivered").length,
+    created: (report?.results || []).filter((r) => r.status === "delivered" && r.mapping_details?.delivery_action === "created").length,
+    updated: (report?.results || []).filter((r) => r.status === "delivered" && r.mapping_details?.delivery_action === "updated").length,
+    validated: (report?.results || []).filter((r) => r.status === "dry_run" || r.status === "validated").length,
+    invalid: (report?.results || []).filter((r) => r.status === "invalid").length,
+    failed: (report?.results || []).filter((r) => r.status === "failed").length,
+  };
+
   const handleInitiateDelivery = () => {
+    if ((scenarioCounts.validated || 0) === 0) return;
     const invalidCount = report?.summary?.counts?.invalid || 0;
     if (invalidCount > 0) {
       setConfirmDeliveryModalOpen(true);
@@ -275,6 +287,7 @@ export default function UploadPage() {
     setBusy("upload");
     setError("");
     setReport(null);
+    setStreamProgress(null);
     setIsValidated(false);
     setIsDelivered(false);
     setHealedChanges([]);
@@ -296,6 +309,7 @@ export default function UploadPage() {
     setBusy("upload");
     setError("");
     setReport(null);
+    setStreamProgress(null);
     setIsValidated(false);
     setIsDelivered(false);
     setHealedChanges([]);
@@ -358,6 +372,7 @@ export default function UploadPage() {
     const startTime = Date.now();
 
     setStreamProgress({
+      mode: dryRun ? "validate" : "ingest",
       current: 0,
       total: rowsToProcess.length,
       percent: 0,
@@ -376,6 +391,7 @@ export default function UploadPage() {
           const elapsedSec = (Date.now() - startTime) / 1000 || 0.1;
           const recPerSec = Math.round(event.index / elapsedSec);
           setStreamProgress({
+            mode: dryRun ? "validate" : "ingest",
             current: event.index,
             total: event.total,
             percent: Math.round((event.index / event.total) * 100),
@@ -398,9 +414,10 @@ export default function UploadPage() {
           const invalidCount = event.summary?.counts?.invalid || 0;
           if (dryRun) {
             setIsValidated(invalidCount === 0);
+            setIsDelivered(false);
             setCurrentStep(4);
           } else {
-            setIsDelivered(true);
+            setIsDelivered((event.summary?.counts?.delivered || 0) > 0);
             setCurrentStep(4);
           }
         },
@@ -422,12 +439,14 @@ export default function UploadPage() {
         const invalidCount = batchReport.summary?.counts?.invalid || 0;
         if (dryRun) {
           setIsValidated(invalidCount === 0);
+          setIsDelivered(false);
           setCurrentStep(4);
         } else {
-          setIsDelivered(true);
+          setIsDelivered((batchReport.summary?.counts?.delivered || 0) > 0);
           setCurrentStep(4);
         }
       } catch (e) {
+        setStreamProgress(null);
         setError(`Processing failed: ${e.message}`);
       }
     } finally {
@@ -674,6 +693,7 @@ export default function UploadPage() {
 
       if (isNowValid) {
         setEditingRow(null);
+        setIsDelivered(false);
         if ((newCounts.invalid || 0) === 0 && (newCounts.dry_run || 0) > 0) {
           setIsValidated(true);
         }
@@ -707,6 +727,11 @@ export default function UploadPage() {
 
     if ((newCounts.invalid || 0) === 0 && (newCounts.dry_run || 0) > 0) {
       setIsValidated(true);
+    }
+    if ((newCounts.delivered || 0) > 0 && (newCounts.dry_run || 0) === 0) {
+      setIsDelivered(true);
+    } else if ((newCounts.delivered || 0) === 0) {
+      setIsDelivered(false);
     }
   };
 
@@ -748,6 +773,10 @@ export default function UploadPage() {
         results: updatedResults,
       }));
 
+      if (isNowValid) {
+        setIsDelivered(false);
+      }
+
       setIsAddingRecord(false);
       setAddRecordError("");
     } catch (e) {
@@ -760,17 +789,6 @@ export default function UploadPage() {
     navigator.clipboard.writeText(JSON.stringify(data, null, 2));
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(""), 2000);
-  };
-
-  // Compute Scenario Counts
-  const scenarioCounts = {
-    ALL: report?.results?.length || 0,
-    delivered: (report?.results || []).filter((r) => r.status === "delivered").length,
-    created: (report?.results || []).filter((r) => r.status === "delivered" && r.mapping_details?.delivery_action === "created").length,
-    updated: (report?.results || []).filter((r) => r.status === "delivered" && r.mapping_details?.delivery_action === "updated").length,
-    validated: (report?.results || []).filter((r) => r.status === "dry_run" || r.status === "validated").length,
-    invalid: (report?.results || []).filter((r) => r.status === "invalid").length,
-    failed: (report?.results || []).filter((r) => r.status === "failed").length,
   };
 
   // Filter and paginate table results
@@ -961,15 +979,8 @@ export default function UploadPage() {
           setStatusFilter("invalid");
           setCurrentStep(4);
         }}
-        validCount={
-          scenarioCounts.validated ||
-          Math.max(
-            0,
-            (report?.summary?.total || fileData?.total_rows || 0) -
-              (report?.summary?.counts?.invalid || 0)
-          )
-        }
-        invalidCount={report?.summary?.counts?.invalid || 0}
+        validCount={scenarioCounts.validated}
+        invalidCount={scenarioCounts.invalid}
         targetResource={targetResource}
         datasetName={datasetName}
       />

@@ -31,9 +31,30 @@ export default function Step4ReconciliationHub({
   onDeleteRecord,
   onInspectRecord,
 }) {
-  const validCount = (scenarioCounts.validated || 0) + (scenarioCounts.delivered || 0);
+  const pendingValidCount = scenarioCounts.validated || 0;
+  const deliveredCount = scenarioCounts.delivered || 0;
   const invalidCount = scenarioCounts.invalid || 0;
-  const canDeliver = validCount > 0;
+  const failedCount = scenarioCounts.failed || 0;
+  const attentionCount = invalidCount + failedCount;
+  const isDeliveredComplete = deliveredCount > 0 && pendingValidCount === 0;
+  const canDeliver = pendingValidCount > 0;
+
+  let deliverLabel = `⚡ Deliver All ${fileData?.total_rows || 0} to Medplum`;
+  if (busy === "ingest") {
+    deliverLabel = "⚡ Ingesting to Medplum in Progress…";
+  } else if (pendingValidCount > 0 && deliveredCount > 0) {
+    deliverLabel = `⚡ Deliver ${pendingValidCount} Pending to Medplum`;
+  } else if (pendingValidCount > 0 && attentionCount > 0) {
+    deliverLabel = `⚡ Deliver ${pendingValidCount} Validated (Quarantine ${attentionCount})`;
+  } else if (pendingValidCount > 0) {
+    deliverLabel = `⚡ Deliver All ${pendingValidCount} to Medplum`;
+  } else if (isDeliveredComplete && attentionCount > 0) {
+    deliverLabel = `✓ Delivered ${deliveredCount} to Medplum (${attentionCount} Excluded)`;
+  } else if (isDeliveredComplete) {
+    deliverLabel = `✓ Delivered All ${deliveredCount} to Medplum`;
+  } else if (report) {
+    deliverLabel = "⚡ Deliver 0 Validated";
+  }
 
   return (
     <div className="wizard-step-pane">
@@ -48,23 +69,28 @@ export default function Step4ReconciliationHub({
 
         <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
           <button
-            className="primary"
+            className={`primary ${isDeliveredComplete && busy !== "ingest" ? "delivered-complete" : ""}`}
             onClick={() => onRunIngestion(false)}
             disabled={!canDeliver || !!busy}
+            title={
+              isDeliveredComplete
+                ? `All ${deliveredCount} valid records are delivered to Medplum. Re-validate in Step 3 or edit/add a record to sync again.`
+                : "Stream validated records to Medplum"
+            }
             style={{
               padding: "9px 18px",
               fontWeight: 700,
               fontSize: "13px",
-              background: canDeliver ? "linear-gradient(135deg, #10b981 0%, #059669 100%)" : undefined,
-              borderColor: canDeliver ? "rgba(16, 185, 129, 0.4)" : undefined,
-              boxShadow: canDeliver ? "0 4px 14px rgba(16, 185, 129, 0.35)" : undefined,
+              ...(canDeliver && !busy
+                ? {
+                    background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                    borderColor: "rgba(16, 185, 129, 0.4)",
+                    boxShadow: "0 4px 14px rgba(16, 185, 129, 0.35)",
+                  }
+                : {}),
             }}
           >
-            {busy === "ingest"
-              ? "⚡ Ingesting to Medplum in Progress…"
-              : invalidCount > 0
-              ? `⚡ Deliver ${validCount} Validated (Quarantine ${invalidCount})`
-              : `⚡ Deliver All ${validCount || fileData?.total_rows || 0} to Medplum`}
+            {deliverLabel}
           </button>
         </div>
       </div>
@@ -82,7 +108,13 @@ export default function Step4ReconciliationHub({
         >
           <div className="row between" style={{ margin: "0 0 6px", fontSize: "12px", alignItems: "center" }}>
             <span style={{ fontWeight: 600 }}>
-              {streamProgress.isComplete ? "✓ Ingestion Processing Complete" : "🚀 Delivering Records via High-Speed Pipeline…"}
+              {streamProgress.mode === "validate"
+                ? streamProgress.isComplete
+                  ? "✓ Pre-Flight Validation Complete"
+                  : "🛡️ Validating Records via Pre-Flight Pipeline…"
+                : streamProgress.isComplete
+                  ? "✓ Live Delivery to Medplum Complete"
+                  : "🚀 Delivering Records to Medplum…"}
               <span className="chip brand sm" style={{ marginLeft: "8px" }}>
                 {streamProgress.current} / {streamProgress.total} Records ({streamProgress.percent}%)
               </span>
