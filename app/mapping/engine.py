@@ -84,6 +84,7 @@ _COMMON_DATE_FORMATS = [
     "%Y-%m-%dT%H:%M:%SZ",
     "%Y-%m-%dT%H:%M:%S",
     "%Y-%m-%d",
+    "%y-%m-%d",
     "%m/%d/%Y %H:%M:%S",
     "%m/%d/%Y",
     "%d/%m/%Y",
@@ -93,6 +94,7 @@ _COMMON_DATE_FORMATS = [
     "%b %d, %Y",
     "%B %d, %Y",
     "%d-%b-%Y",
+    "%d-%b-%y",
     "%d %b %Y",
 ]
 
@@ -151,6 +153,12 @@ def normalize_fhir_datetime(v: Any, target_path: str = "") -> str:
                 clean_date = f"{date_part[:4]}-{date_part[4:6]}-{date_part[6:8]}"
             else:
                 clean_date = date_part
+                for fmt in _COMMON_DATE_FORMATS:
+                    try:
+                        clean_date = datetime.strptime(date_part, fmt).strftime("%Y-%m-%d")
+                        break
+                    except ValueError:
+                        continue
 
     if is_date_only or not m_time:
         return clean_date

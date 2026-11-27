@@ -1,4 +1,7 @@
 import React from "react";
+import { ShieldCheck, AlertTriangle, Pencil, Send } from "lucide-react";
+import AppDialog from "@/components/ui/Dialog.jsx";
+import Button from "@/components/ui/Button.jsx";
 
 export default function DeliveryConfirmationModal({
   isOpen,
@@ -10,153 +13,89 @@ export default function DeliveryConfirmationModal({
   targetResource = "Patient",
   datasetName = "Dataset",
 }) {
-  if (!isOpen) return null;
-
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div
-        className="modal-box"
-        style={{ maxWidth: "620px" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="modal-header">
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span style={{ fontSize: "22px" }}>🚀</span>
-            <div>
-              <h3 style={{ margin: 0, fontSize: "16px" }}>
-                Confirm Medplum Ingestion &amp; Delivery
-              </h3>
-              <span className="sub-meta">
-                HL7 FHIR R4 Destination: <code>{targetResource}</code> • Batch: {datasetName}
-              </span>
-            </div>
-          </div>
-          <button className="secondary sm" onClick={onClose}>✕</button>
-        </div>
-
-        <div className="modal-body" style={{ padding: "20px" }}>
-          {invalidCount > 0 ? (
-            <div>
-              <div
-                style={{
-                  background: "rgba(245, 158, 11, 0.12)",
-                  border: "1px solid rgba(245, 158, 11, 0.4)",
-                  borderRadius: "var(--radius-md)",
-                  padding: "14px 16px",
-                  marginBottom: "16px",
-                }}
-              >
-                <div style={{ fontWeight: 700, color: "#fcd34d", fontSize: "14px", marginBottom: "4px" }}>
-                  ⚠️ Quality Gate Safety Notice
-                </div>
-                <div style={{ fontSize: "12px", color: "var(--text-muted)", lineHeight: 1.5 }}>
-                  <strong>{validCount} records</strong> passed pre-flight validation and are ready for Medplum delivery.
-                  <br />
-                  <strong>{invalidCount} record(s)</strong> have source data violations and <strong>will NOT be submitted</strong> to Medplum to protect clinical repository integrity.
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
-                <div
-                  style={{
-                    background: "rgba(16, 185, 129, 0.1)",
-                    border: "1px solid rgba(16, 185, 129, 0.3)",
-                    borderRadius: "8px",
-                    padding: "14px",
-                  }}
-                >
-                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#34d399", textTransform: "uppercase" }}>
-                    ✓ Delivering to Medplum
-                  </div>
-                  <div style={{ fontSize: "24px", fontWeight: 800, color: "#34d399", margin: "4px 0" }}>
-                    {validCount}
-                  </div>
-                  <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                    Conforms to FHIR R4 schema constraints. Will be created or updated idempotently.
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    background: "rgba(239, 68, 68, 0.1)",
-                    border: "1px solid rgba(239, 68, 68, 0.3)",
-                    borderRadius: "8px",
-                    padding: "14px",
-                  }}
-                >
-                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#f87171", textTransform: "uppercase" }}>
-                    🚨 Quarantining (No Delivery)
-                  </div>
-                  <div style={{ fontSize: "24px", fontWeight: 800, color: "#f87171", margin: "4px 0" }}>
-                    {invalidCount}
-                  </div>
-                  <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                    Isolated in review ledger. Will not corrupt Medplum. Can be fixed via 1-click Auto-Fix.
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ fontSize: "12px", color: "var(--muted)", background: "rgba(0,0,0,0.25)", padding: "10px 14px", borderRadius: "6px" }}>
-                💡 <strong>Clinical Tip:</strong> You can proceed to deliver the clean records now, or click &ldquo;Review &amp; Auto-Fix&rdquo; below to correct date/field violations in 1 click before delivering.
-              </div>
-            </div>
-          ) : (
-            <div style={{ textAlign: "center", padding: "16px 0" }}>
-              <div style={{ fontSize: "36px", marginBottom: "8px" }}>✅</div>
-              <h4 style={{ margin: "0 0 6px", fontSize: "16px" }}>100% Quality Gate Cleared</h4>
-              <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)" }}>
-                All <strong>{validCount} records</strong> conform to official HL7 FHIR R4 schema constraints.
-                Zero violations detected. Ready for immediate live delivery to Medplum.
-              </p>
-            </div>
-          )}
-        </div>
-
-        <div
-          className="modal-header"
-          style={{
-            borderTop: "1px solid var(--card-border)",
-            justifyContent: "space-between",
-            gap: "10px",
-            flexWrap: "wrap",
-          }}
-        >
-          <button className="secondary" onClick={onClose}>
+    <AppDialog
+      open={isOpen}
+      onClose={onClose}
+      sheetOnMobile={false}
+      maxWidth="580px"
+      title="Confirm Medplum Ingestion & Delivery"
+      subtitle={`HL7 FHIR R4 Destination: ${targetResource} • Batch: ${datasetName}`}
+      footer={
+        <>
+          <Button variant="secondary" autoFocus onClick={onClose}>
             Cancel
-          </button>
-
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          </Button>
+          <div className="flex flex-wrap items-center gap-2">
             {invalidCount > 0 && onReviewQuarantine && (
-              <button
-                className="secondary"
-                onClick={onReviewQuarantine}
-                style={{
-                  color: "#f59e0b",
-                  borderColor: "rgba(245, 158, 11, 0.4)",
-                  background: "rgba(245, 158, 11, 0.1)",
-                }}
-              >
-                ✏️ Review &amp; Auto-Fix ({invalidCount})
-              </button>
+              <Button variant="secondary" onClick={onReviewQuarantine}>
+                <Pencil className="h-3.5 w-3.5 text-[var(--warn)]" aria-hidden="true" />
+                Review &amp; Fix ({invalidCount})
+              </Button>
             )}
-
-            <button
-              className="primary"
-              onClick={onConfirm}
-              style={{
-                background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                borderColor: "rgba(16, 185, 129, 0.5)",
-                boxShadow: "0 4px 14px rgba(16, 185, 129, 0.4)",
-              }}
-            >
+            <Button variant="success" onClick={onConfirm}>
+              <Send className="h-3.5 w-3.5" aria-hidden="true" />
               {invalidCount > 0
-                ? `🚀 Deliver ${validCount} Validated (Quarantine ${invalidCount})`
-                : `🚀 Deliver All ${validCount} to Medplum`}
-            </button>
+                ? `Deliver ${validCount} Validated (Quarantine ${invalidCount})`
+                : `Deliver All ${validCount} to Medplum`}
+            </Button>
+          </div>
+        </>
+      }
+    >
+      {invalidCount > 0 ? (
+        <div className="space-y-4">
+          <div className="rounded-[var(--radius-md)] border border-[var(--warn-border)] bg-[var(--warn-bg)] p-3.5 space-y-1">
+            <div className="flex items-center gap-2 text-xs font-bold text-[var(--warn)]">
+              <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>Quality Gate Quarantine Protection</span>
+            </div>
+            <p className="m-0 text-xs leading-relaxed text-[var(--text-secondary)]">
+              <strong className="text-[var(--text-primary)]">{validCount}</strong> record(s) passed pre-flight FHIR R4 validation and will be upserted.{" "}
+              <strong className="text-[var(--text-primary)]">{invalidCount}</strong> quarantined record(s) will{" "}
+              <strong>not</strong> be sent to Medplum.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-[var(--radius-md)] border border-[var(--ok-border)] bg-[var(--ok-bg)] p-3.5">
+              <div className="text-xs font-bold uppercase tracking-wide text-[var(--ok)]">
+                Delivering to Medplum
+              </div>
+              <div className="my-1 text-2xl font-bold tabular-nums text-[var(--ok)]">
+                {validCount}
+              </div>
+              <div className="text-xs text-[var(--text-muted)]">
+                Idempotent conditional upsert.
+              </div>
+            </div>
+
+            <div className="rounded-[var(--radius-md)] border border-[var(--bad-border)] bg-[var(--bad-bg)] p-3.5">
+              <div className="text-xs font-bold uppercase tracking-wide text-[var(--bad)]">
+                Quarantining
+              </div>
+              <div className="my-1 text-2xl font-bold tabular-nums text-[var(--bad)]">
+                {invalidCount}
+              </div>
+              <div className="text-xs text-[var(--text-muted)]">
+                Held safely in review ledger.
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
+      ) : (
+        <div className="flex flex-col items-center gap-2.5 py-4 text-center">
+          <div className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--ok-border)] bg-[var(--ok-bg)] text-[var(--ok)]">
+            <ShieldCheck className="h-5 w-5" aria-hidden="true" />
+          </div>
+          <h3 className="m-0 text-base font-bold text-[var(--text-primary)]">
+            100% Quality Gate Cleared
+          </h3>
+          <p className="m-0 text-xs text-[var(--text-muted)] clinical-prose">
+            All <strong className="tabular-nums text-[var(--text-primary)]">{validCount}</strong> records conform to official HL7 FHIR R4 constraints and are ready for Medplum delivery.
+          </p>
+        </div>
+      )}
+    </AppDialog>
   );
 }
-

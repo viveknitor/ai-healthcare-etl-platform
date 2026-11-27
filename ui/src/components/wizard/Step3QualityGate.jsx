@@ -1,4 +1,24 @@
 import React from "react";
+import {
+  ShieldCheck,
+  AlertTriangle,
+  Search,
+  Wrench,
+  Send,
+  ArrowRight,
+  CheckCircle2,
+  Loader2,
+} from "lucide-react";
+import Button from "@/components/ui/Button.jsx";
+import Badge from "@/components/ui/Badge.jsx";
+import { cn } from "@/utils/cn.js";
+
+const HEAL_STAGES = [
+  { num: 1, title: "1. Errors", desc: "Capture traces" },
+  { num: 2, title: "2. Diagnose", desc: "FHIR R4 root cause" },
+  { num: 3, title: "3. Patch", desc: "Repair transforms" },
+  { num: 4, title: "4. Re-Check", desc: "Re-test batch" },
+];
 
 export default function Step3QualityGate({
   fileData,
@@ -18,296 +38,251 @@ export default function Step3QualityGate({
   const totalCount = report?.summary?.total || fileData?.total_rows || 0;
   const validCount = Math.max(0, totalCount - invalidCount);
   const hasValidationErrors = invalidCount > 0;
-  const is100PercentValid = (isValidated || !!report) && invalidCount === 0;
+  const is100PercentValid = (isValidated || Boolean(report)) && invalidCount === 0;
 
   return (
-    <div className="wizard-step-pane">
-      <div className="section-header-row">
+    <div className="space-y-4">
+      {/* Header & Primary Controls */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="section-title">Step 3: Quality Gate &amp; AI Auto-Healing</h3>
-          <p className="sub-meta">Pre-flight schema validation against official HL7 FHIR R4 specifications</p>
+          <h2 className="m-0 text-lg font-bold tracking-tight text-[var(--text-primary)]">
+            Phase 3: Quality Gate
+          </h2>
+          <p className="m-0 text-xs text-[var(--text-muted)]">
+            Dry-run FHIR R4 schema check.
+          </p>
         </div>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-          <button
-            className="secondary"
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            loading={busy === "validate"}
+            disabled={Boolean(busy) && busy !== "validate"}
             onClick={onRunValidation}
-            disabled={!!busy}
-            style={{ fontWeight: 600 }}
           >
+            {busy !== "validate" && <ShieldCheck className="h-4 w-4 text-[var(--brand)]" aria-hidden="true" />}
             {busy === "validate"
-              ? "🛡️ Validating Schema…"
+              ? "Validating…"
               : report
-              ? `🛡️ Re-Validate Schema (${totalCount})`
-              : `🛡️ Run Pre-Flight Validation (${fileData?.total_rows || 0})`}
-          </button>
+              ? `Re-Validate (${totalCount})`
+              : `Validate (${fileData?.total_rows || 0})`}
+          </Button>
 
           {report && onInitiateDelivery && (
-            <button
-              className="primary"
+            <Button
+              variant="success"
+              disabled={Boolean(busy) || validCount === 0}
               onClick={onInitiateDelivery}
-              disabled={!!busy || validCount === 0}
-              style={{
-                fontWeight: 700,
-                background: invalidCount === 0
-                  ? "linear-gradient(135deg, #10b981 0%, #059669 100%)"
-                  : "linear-gradient(135deg, #10b981 0%, #047857 100%)",
-                boxShadow: "0 4px 14px rgba(16, 185, 129, 0.35)",
-              }}
             >
+              <Send className="h-4 w-4" aria-hidden="true" />
               {invalidCount > 0
-                ? `⚡ Ingest Validated (${validCount}) (Quarantine ${invalidCount})`
-                : `⚡ Ingest All (${validCount}) to Medplum`}
-            </button>
+                ? `Deliver ${validCount} Valid`
+                : `Deliver (${validCount})`}
+            </Button>
           )}
         </div>
       </div>
 
-      {/* 1. Schema Approved & Ready Badge */}
+      {/* Summary Status Banner */}
       {!hasValidationErrors && (
-        <div className="card" style={{ padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span style={{ fontSize: "20px" }}>🛡️</span>
+        <div
+          className={cn(
+            "flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-lg)] border px-5 py-4 shadow-[var(--shadow-sm)]",
+            is100PercentValid
+              ? "border-[var(--ok-border)] bg-[var(--ok-bg)]"
+              : "border-[var(--border-default)] bg-[var(--bg-surface)]"
+          )}
+        >
+          <div className="flex items-start gap-3">
+            <span
+              className={cn(
+                "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border",
+                is100PercentValid
+                  ? "border-[var(--ok-border)] bg-[var(--bg-surface)] text-[var(--ok)]"
+                  : "border-[var(--border-default)] bg-[var(--bg-subtle)] text-[var(--brand)]"
+              )}
+            >
+              <ShieldCheck className="h-5 w-5" aria-hidden="true" />
+            </span>
             <div>
-              <strong style={{ display: "block" }}>
-                {is100PercentValid ? "100% Quality Gate Cleared & Ready for Ingestion" : "Ready for Pre-Flight Validation"}
-              </strong>
-              <span className="sub-meta">
+              <strong className="block text-sm text-[var(--text-primary)]">
                 {is100PercentValid
-                  ? "All records conform to FHIR R4 schema constraints. Zero violations detected."
-                  : "Click 'Run Pre-Flight Validation' above to test all records before delivering to Medplum."}
+                  ? `All ${totalCount} records valid`
+                  : "Ready to validate"}
+              </strong>
+              <span className="text-xs text-[var(--text-muted)]">
+                {is100PercentValid
+                  ? "Zero HL7 FHIR R4 schema violations."
+                  : "Run Validate to check all rows before delivery."}
               </span>
             </div>
           </div>
+
           {is100PercentValid && (
-            <span className="chip ok" style={{ fontSize: "12px", padding: "6px 14px" }}>
-              ✓ 100% Validated ({fileData?.total_rows})
-            </span>
+            <Badge tone="ok" icon={CheckCircle2}>
+              100% Validated ({totalCount})
+            </Badge>
           )}
         </div>
       )}
 
-      {/* 2. Quality Gate Violations Detected Banner */}
+      {/* Violations Banner */}
       {hasValidationErrors && (
         <div
-          style={{
-            background: "rgba(239, 68, 68, 0.12)",
-            border: "1px solid rgba(239, 68, 68, 0.4)",
-            borderRadius: "var(--radius-md)",
-            padding: "16px 20px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: "12px",
-            marginTop: "12px",
-          }}
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-4 rounded-[var(--radius-lg)] border border-[var(--bad-border)] bg-[var(--bad-bg)] px-5 py-4"
         >
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, color: "#f87171", fontSize: "14px" }}>
-              <span>🚨 Schema Violations Detected</span>
-              <span className="chip bad" style={{ fontSize: "11px", fontWeight: 600 }}>
-                {invalidCount} Records Quarantined
-              </span>
+          <div className="space-y-1 max-w-xl">
+            <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-[var(--bad)]">
+              <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>Schema Violations Detected</span>
+              <Badge tone="bad">{invalidCount} Records Quarantined</Badge>
             </div>
-            <p style={{ margin: "4px 0 0", fontSize: "12px", color: "var(--text-muted)" }}>
-              Gemini Self-Healing Agent will inspect FHIR R4 schema errors, heal target rules, update the contract, and re-test automatically.
+            <p className="m-0 text-xs leading-relaxed text-[var(--text-secondary)]">
+              Quarantined records are isolated safely from Medplum. Trigger AI Auto-Heal to repair contract rules or inspect individual rows for manual remediation.
             </p>
+            {healedChanges.length > 0 && (
+              <p className="m-0 text-xs font-medium text-[var(--warn)]">
+                Auto-heal already ran once. Remaining invalid rows likely reflect source data issues (fixable via Edit Record).
+              </p>
+            )}
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>
-            <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-              <button
-                className="secondary"
-                onClick={onViewInvalid}
-                style={{
-                  background: "rgba(239, 68, 68, 0.2)",
-                  color: "#fca5a5",
-                  borderColor: "rgba(239, 68, 68, 0.5)",
-                  fontSize: "12px",
-                }}
-              >
-                🔍 View Quarantined Records ({invalidCount})
-              </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="danger" onClick={onViewInvalid}>
+              <Search className="h-3.5 w-3.5" aria-hidden="true" />
+              View Quarantined ({invalidCount})
+            </Button>
 
-              <button
-                className="primary"
-                onClick={onTriggerAutoHeal}
-                disabled={!!busy}
-                style={{
-                  background: healedChanges.length > 0
-                    ? "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)"
-                    : "linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)",
-                  borderColor: "rgba(255, 255, 255, 0.3)",
-                  boxShadow: healedChanges.length > 0
-                    ? "0 4px 14px rgba(245, 158, 11, 0.4)"
-                    : "0 4px 14px rgba(236, 72, 153, 0.4)",
-                  minWidth: "250px",
-                }}
-              >
-                {busy === "healing"
-                  ? "🩹 Healing Schema in Progress…"
-                  : healedChanges.length > 0
-                  ? `🔄 Re-Run Auto-Heal on Remaining (${invalidCount})`
-                  : "🩹 AI Auto-Heal Contract with Gemini"}
-              </button>
-            </div>
-            {healedChanges.length > 0 && (
-              <span style={{ fontSize: "11px", color: "#fcd34d", fontWeight: 500 }}>
-                ⚠️ Notice: Auto-heal ran. Remaining invalid records can be fixed via "✏️ Edit Record" or will be safely quarantined during ingest.
-              </span>
-            )}
+            <Button
+              size="sm"
+              variant="primary"
+              loading={busy === "healing"}
+              disabled={Boolean(busy) && busy !== "healing"}
+              onClick={onTriggerAutoHeal}
+            >
+              {busy !== "healing" && <Wrench className="h-3.5 w-3.5" aria-hidden="true" />}
+              {busy === "healing"
+                ? "Healing Schema…"
+                : healedChanges.length > 0
+                ? `Re-Run Auto-Heal (${invalidCount})`
+                : "AI Auto-Heal Contract"}
+            </Button>
           </div>
         </div>
       )}
 
-      {/* 3. Active AI Self-Healing Progress Tracker (4-Stage Stepper) */}
+      {/* Active AI Self-Healing Tracker */}
       {(busy === "healing" || healingTrack.active) && (
         <div
-          style={{
-            background: "linear-gradient(135deg, rgba(236, 72, 153, 0.12) 0%, rgba(139, 92, 246, 0.12) 100%)",
-            border: "1px solid rgba(236, 72, 153, 0.4)",
-            borderRadius: "var(--radius-md)",
-            padding: "16px 20px",
-            marginTop: "12px",
-          }}
+          aria-live="polite"
+          className="rounded-[var(--radius-lg)] border border-[var(--ai-border)] bg-[var(--ai-bg)] p-4 space-y-3"
         >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <div className="spinner" style={{ width: "16px", height: "16px", borderColor: "#ec4899", borderTopColor: "transparent" }} />
-              <strong style={{ color: "#f472b6", fontSize: "13px" }}>
-                AI Closed-Loop Self-Healing Agent Active
-              </strong>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-bold text-[var(--ai)]">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              <span>AI Closed-Loop Self-Healing Agent Active</span>
             </div>
-            <span className="chip" style={{ background: "rgba(236, 72, 153, 0.25)", color: "#fbcfe8", fontSize: "11px" }}>
-              Analyzing {healingTrack.errorsTotal || invalidCount} Error Traces
-            </span>
+            <Badge tone="ai">Analyzing {healingTrack.errorsTotal || invalidCount} Error Trace(s)</Badge>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px", fontSize: "11px" }}>
-            <div style={{
-              padding: "8px 10px",
-              borderRadius: "6px",
-              background: healingTrack.step >= 1 ? "rgba(16, 185, 129, 0.2)" : "rgba(255, 255, 255, 0.05)",
-              border: healingTrack.step === 1 ? "1px solid #ec4899" : "1px solid transparent",
-              color: healingTrack.step >= 1 ? "#34d399" : "var(--muted)",
-            }}>
-              <strong style={{ display: "block" }}>1. Inspect Errors</strong>
-              <span style={{ fontSize: "10px", opacity: 0.8 }}>{healingTrack.errorsTotal || 0} violations captured</span>
-            </div>
-            <div style={{
-              padding: "8px 10px",
-              borderRadius: "6px",
-              background: healingTrack.step >= 2 ? "rgba(16, 185, 129, 0.2)" : "rgba(255, 255, 255, 0.05)",
-              border: healingTrack.step === 2 ? "1px solid #ec4899" : "1px solid transparent",
-              color: healingTrack.step >= 2 ? "#34d399" : "var(--muted)",
-            }}>
-              <strong style={{ display: "block" }}>2. Gemini Reasoning</strong>
-              <span style={{ fontSize: "10px", opacity: 0.8 }}>FHIR R4 root-cause diagnosis</span>
-            </div>
-            <div style={{
-              padding: "8px 10px",
-              borderRadius: "6px",
-              background: healingTrack.step >= 3 ? "rgba(16, 185, 129, 0.2)" : "rgba(255, 255, 255, 0.05)",
-              border: healingTrack.step === 3 ? "1px solid #ec4899" : "1px solid transparent",
-              color: healingTrack.step >= 3 ? "#34d399" : "var(--muted)",
-            }}>
-              <strong style={{ display: "block" }}>3. Surgical Repair</strong>
-              <span style={{ fontSize: "10px", opacity: 0.8 }}>Patching target casing &amp; types</span>
-            </div>
-            <div style={{
-              padding: "8px 10px",
-              borderRadius: "6px",
-              background: healingTrack.step >= 4 ? "rgba(16, 185, 129, 0.2)" : "rgba(255, 255, 255, 0.05)",
-              border: healingTrack.step === 4 ? "1px solid #ec4899" : "1px solid transparent",
-              color: healingTrack.step >= 4 ? "#34d399" : "var(--muted)",
-            }}>
-              <strong style={{ display: "block" }}>4. Auto-Revalidation</strong>
-              <span style={{ fontSize: "10px", opacity: 0.8 }}>Re-testing on dataset</span>
-            </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 text-xs">
+            {HEAL_STAGES.map((st) => {
+              const reached = healingTrack.step >= st.num;
+              const current = healingTrack.step === st.num;
+              return (
+                <div
+                  key={st.num}
+                  className={cn(
+                    "rounded-[var(--radius-sm)] border p-2.5",
+                    current
+                      ? "border-[var(--ai)] bg-[var(--bg-surface)]"
+                      : reached
+                      ? "border-[var(--ok-border)] bg-[var(--ok-bg)]"
+                      : "border-[var(--border-default)] bg-[var(--bg-surface)] opacity-60"
+                  )}
+                >
+                  <div className="font-bold text-[var(--text-primary)]">{st.title}</div>
+                  <div className="text-[var(--text-muted)]">{st.desc}</div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
 
-      {/* 4. Self-Healing Success & Track Report Card */}
+      {/* Self-Healing Audit Report */}
       {healedChanges.length > 0 && !busy && (
         <div
-          style={{
-            background:
-              invalidCount === 0
-                ? "linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(59, 130, 246, 0.12) 100%)"
-                : "linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(59, 130, 246, 0.12) 100%)",
-            border:
-              invalidCount === 0
-                ? "1px solid rgba(16, 185, 129, 0.4)"
-                : "1px solid rgba(245, 158, 11, 0.4)",
-            borderRadius: "var(--radius-md)",
-            padding: "16px 20px",
-            marginTop: "12px",
-          }}
+          className={cn(
+            "rounded-[var(--radius-lg)] border p-5 space-y-3.5",
+            invalidCount === 0
+              ? "border-[var(--ok-border)] bg-[var(--ok-bg)]/60"
+              : "border-[var(--warn-border)] bg-[var(--warn-bg)]/60"
+          )}
         >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "12px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, color: invalidCount === 0 ? "var(--ok)" : "#fcd34d", fontSize: "13px" }}>
-              <span>✓ AI Closed-Loop Self-Healing Certified:</span>
-              <span style={{ fontWeight: 400, color: "#fff" }}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm font-bold text-[var(--text-primary)]">
+              <CheckCircle2
+                className={cn("h-4 w-4", invalidCount === 0 ? "text-[var(--ok)]" : "text-[var(--warn)]")}
+                aria-hidden="true"
+              />
+              <span>
                 {invalidCount === 0
-                  ? "Contract repaired, re-tested & auto-saved. 100% Quality Gate cleared!"
-                  : `Contract repaired (${healedChanges.length} rules). Valid records ready; ${invalidCount} data anomalies quarantined.`}
+                  ? "AI Closed-Loop Self-Healing Certified — 100% Quality Gate Cleared"
+                  : `Contract Repaired (${healedChanges.length} rules); ${invalidCount} data anomaly(ies) quarantined`}
               </span>
             </div>
-            {invalidCount === 0 ? (
-              <span className="chip ok" style={{ fontSize: "11px", fontWeight: 600 }}>
-                ✓ 100% Quality Gate Cleared
-              </span>
-            ) : (
-              <span className="chip bad" style={{ fontSize: "11px", fontWeight: 600, background: "rgba(245, 158, 11, 0.2)", borderColor: "#f59e0b", color: "#fcd34d" }}>
-                ⚠️ Partial Healing: {(report?.summary?.total || 0) - invalidCount} Validated, {invalidCount} Quarantined
-              </span>
-            )}
+            <Badge tone={invalidCount === 0 ? "ok" : "warn"}>
+              {invalidCount === 0
+                ? "0 Violations Remaining"
+                : `${validCount} Validated • ${invalidCount} Quarantined`}
+            </Badge>
           </div>
 
-          {/* 4 Track KPI Metric Pills */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "10px", marginBottom: "12px" }}>
-            <div style={{ background: "rgba(0, 0, 0, 0.25)", padding: "8px 12px", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <div style={{ fontSize: "10px", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                {invalidCount === 0 ? "Violations Resolved" : "Schema Errors Fixed"}
-              </div>
-              <div style={{ fontSize: "15px", fontWeight: 700, color: "#34d399", marginTop: "2px" }}>
-                {invalidCount === 0
-                  ? `${healingTrack.errorsTotal || 4} Resolved`
-                  : `${healedChanges.length} Rules Healed`}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-xs">
+            <div className="rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
+              <div className="text-[var(--text-muted)] font-semibold">Rules Repaired</div>
+              <div className="mt-1 text-base font-bold tabular-nums text-[var(--ok)]">
+                {healedChanges.length} Rules
               </div>
             </div>
-            <div style={{ background: "rgba(0, 0, 0, 0.25)", padding: "8px 12px", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <div style={{ fontSize: "10px", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                {invalidCount > 0 ? "Quarantined Data" : "Rules Repaired"}
-              </div>
-              <div style={{ fontSize: "15px", fontWeight: 700, color: invalidCount > 0 ? "#f87171" : "#60a5fa", marginTop: "2px" }}>
-                {invalidCount > 0 ? `${invalidCount} Records` : `${healedChanges.length} Rules Healed`}
+            <div className="rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
+              <div className="text-[var(--text-muted)] font-semibold">Quarantined Rows</div>
+              <div
+                className={cn(
+                  "mt-1 text-base font-bold tabular-nums",
+                  invalidCount > 0 ? "text-[var(--bad)]" : "text-[var(--ok)]"
+                )}
+              >
+                {invalidCount} Records
               </div>
             </div>
-            <div style={{ background: "rgba(0, 0, 0, 0.25)", padding: "8px 12px", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <div style={{ fontSize: "10px", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>AI Model</div>
-              <div style={{ fontSize: "15px", fontWeight: 700, color: "#c084fc", marginTop: "2px" }}>
+            <div className="rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
+              <div className="text-[var(--text-muted)] font-semibold">AI Model</div>
+              <div className="mt-1 truncate text-sm font-bold font-mono text-[var(--ai)]">
                 {healingTrack.model || llmMetrics?.model || "gemini-flash-lite"}
               </div>
             </div>
-            <div style={{ background: "rgba(0, 0, 0, 0.25)", padding: "8px 12px", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <div style={{ fontSize: "10px", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>Cost &amp; Latency</div>
-              <div style={{ fontSize: "15px", fontWeight: 700, color: "#facc15", marginTop: "2px" }}>
-                {healingTrack.costFormatted || llmMetrics?.cost_formatted || "$0.00025"} • {healingTrack.latencyMs || llmMetrics?.latency_ms || 1200}ms
+            <div className="rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
+              <div className="text-[var(--text-muted)] font-semibold">Cost &amp; Latency</div>
+              <div className="mt-1 text-sm font-bold tabular-nums text-[var(--text-primary)]">
+                {healingTrack.costFormatted || llmMetrics?.cost_formatted || "$0.00025"} •{" "}
+                {healingTrack.latencyMs || llmMetrics?.latency_ms || 1200}ms
               </div>
             </div>
           </div>
 
-          {/* List of Applied Modifications */}
-          <div>
-            <div style={{ fontSize: "11px", fontWeight: 600, color: "var(--muted)", marginBottom: "4px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-              Track Audit Log ({healedChanges.length} rules modified):
+          <div className="space-y-1 text-xs">
+            <div className="font-semibold text-[var(--text-secondary)]">
+              Audit Log ({healedChanges.length} modifications):
             </div>
-            <ul style={{ margin: 0, paddingLeft: "18px", fontSize: "12px", color: "var(--text)" }}>
+            <ul className="m-0 list-disc pl-5 space-y-1">
               {healedChanges.map((c, idx) => (
-                <li key={idx} style={{ marginTop: "3px" }}>
-                  <code style={{ background: "rgba(0,0,0,0.3)", padding: "2px 6px", borderRadius: "4px" }}>{c}</code>
+                <li key={idx}>
+                  <code className="rounded border border-[var(--border-default)] bg-[var(--bg-surface)] px-1.5 py-0.5 text-xs">
+                    {c}
+                  </code>
                 </li>
               ))}
             </ul>
@@ -316,29 +291,29 @@ export default function Step3QualityGate({
       )}
 
       {/* Navigation Footer */}
-      <div style={{ marginTop: "20px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
-        <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+        <div className="text-xs">
           {hasValidationErrors && (
-            <span style={{ fontSize: "12px", color: "#fcd34d" }}>
-              ⚠️ {validCount} validated records ready for Medplum. {invalidCount} quarantined records will be safely held in review.
+            <span className="font-medium text-[var(--warn)]">
+              {validCount} validated records ready for Medplum; {invalidCount} quarantined records will be held safely.
             </span>
           )}
           {is100PercentValid && (
-            <span style={{ fontSize: "12px", color: "var(--ok)" }}>
-              ✓ All {totalCount} records certified and ready for live Medplum delivery.
+            <span className="font-medium text-[var(--ok)]">
+              All {totalCount} records certified and ready for live Medplum delivery.
             </span>
           )}
         </div>
 
-        <button
-          className="primary"
-          onClick={onProceed}
+        <Button
+          variant="primary"
           disabled={!report && !isValidated}
+          onClick={onProceed}
         >
-          Continue to Step 4: Live Results &amp; Audit Hub →
-        </button>
+          <span>Next Step</span>
+          <ArrowRight className="h-4 w-4" aria-hidden="true" />
+        </Button>
       </div>
     </div>
   );
 }
-

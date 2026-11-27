@@ -1,264 +1,186 @@
-/**
- * AgentLiveFeed.jsx
- * Animated sequential live-run feed for the multi-agent pipeline.
- *
- * Rules enforced here:
- * - Only renders agents whose status !== 'pending'
- * - Self-healer (4B) appears as indented sub-panel under Agent 4 on error
- * - Agent 3 waiting_human → shows Approve / Reject buttons wired to onApprove
- * - Done panels collapse to one line; click to expand
- * - Auto-scrolls to latest running/waiting panel; stops if user scrolled up
- * - aria-live on a short status line only
- * - MotionConfig reducedMotion="user" (Decision Q5)
- * - Interval runs only while something is running (Decision Q6)
- */
-
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
-  AnimatePresence,
-  motion,
-  MotionConfig,
-} from "framer-motion";
+  CheckCircle2,
+  AlertTriangle,
+  Clock,
+  Loader2,
+  ChevronDown,
+  ChevronRight,
+  Search,
+  Send,
+} from "lucide-react";
 import { durationSec } from "./agentSimulator.js";
+import Button from "@/components/ui/Button.jsx";
+import Badge from "@/components/ui/Badge.jsx";
+import { cn } from "@/utils/cn.js";
 
-// ─── Status helpers ───────────────────────────────────────────────────────────
-
-function statusLabel(status) {
+function getStatusMeta(status) {
   switch (status) {
-    case "running":       return "● Running";
-    case "done":          return "✓ Done";
-    case "error":         return "⚠ Error";
-    case "waiting_human": return "⏳ Waiting";
-    default:              return status;
+    case "running":
+      return { label: "Running", tone: "info", icon: Loader2, spin: true };
+    case "done":
+      return { label: "Done", tone: "ok", icon: CheckCircle2, spin: false };
+    case "error":
+      return { label: "Error", tone: "bad", icon: AlertTriangle, spin: false };
+    case "waiting_human":
+      return { label: "Awaiting Approval", tone: "warn", icon: Clock, spin: false };
+    default:
+      return { label: status, tone: "neutral", icon: Clock, spin: false };
   }
 }
 
-function statusClass(status) {
-  switch (status) {
-    case "running":       return "running";
-    case "done":          return "done";
-    case "error":         return "error";
-    case "waiting_human": return "waiting";
-    default:              return "";
-  }
-}
-
-// ─── Single Agent Run Panel ───────────────────────────────────────────────────
-
-function AgentRunPanel({ run, onApprove, onInspect, isSubAgent }) {
+function AgentRunPanel({ run, onApprove, onReject, onInspect, isSubAgent }) {
   const [expanded, setExpanded] = useState(run.status !== "done");
-  const panelId = `feed-panel-${run.id}`;
   const bodyId = `feed-body-${run.id}`;
 
-  // Auto-expand when status changes away from done
   useEffect(() => {
     if (run.status !== "done") setExpanded(true);
   }, [run.status]);
 
-  const panelClass = [
-    "agent-run-panel",
-    statusClass(run.status),
-    isSubAgent || run.isSubAgent ? "sub-agent" : "",
-  ].filter(Boolean).join(" ");
-
   const dur = durationSec(run);
+  const meta = getStatusMeta(run.status);
+  const AgentIcon = run.icon;
+  const StatusIcon = meta.icon;
+
+  const borderAccent =
+    run.status === "done"
+      ? "border-l-[var(--ok)]"
+      : run.status === "error"
+      ? "border-l-[var(--bad)]"
+      : run.status === "waiting_human"
+      ? "border-l-[var(--warn)]"
+      : "border-l-[var(--brand)]";
 
   return (
     <div
-      id={panelId}
-      className={panelClass}
-      tabIndex={0}
+      id={`feed-panel-${run.id}`}
       role="region"
-      aria-label={`${run.codename} — ${statusLabel(run.status)}`}
+      aria-label={`${run.codename} — ${meta.label}`}
+      className={cn(
+        "rounded-[var(--radius-md)] border border-[var(--border-default)] border-l-[3px] bg-[var(--bg-surface)] px-3.5 py-2.5",
+        borderAccent,
+        (isSubAgent || run.isSubAgent) && "ml-6 border-l-[var(--ai)]"
+      )}
     >
-      {/* ── Collapsed one-liner (done state) ── */}
       {run.status === "done" && !expanded ? (
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "12px" }}>
-          <span style={{ fontSize: "16px" }}>{run.icon}</span>
-          <strong style={{ color: "#fff", whiteSpace: "nowrap" }}>{run.codename}</strong>
-          <span style={{ color: "var(--ok)", fontWeight: 700 }}>✓ Done</span>
-          <span style={{ color: "var(--text-muted)", flexGrow: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div className="flex items-center gap-2.5 text-xs">
+          {AgentIcon && <AgentIcon className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" aria-hidden="true" />}
+          <strong className="whitespace-nowrap text-[var(--text-primary)]">{run.codename}</strong>
+          <Badge tone="ok" icon={CheckCircle2}>
+            Done
+          </Badge>
+          <span className="min-w-0 flex-1 truncate text-[var(--text-muted)]">
             {run.handoffSummary}
           </span>
-          {dur && (
-            <span style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>{dur}s</span>
-          )}
-          <button
+          {dur && <span className="tabular-nums text-[var(--text-muted)]">{dur}s</span>}
+          <Button
+            size="sm"
+            variant="ghost"
             aria-expanded={false}
             aria-controls={bodyId}
             onClick={() => setExpanded(true)}
-            style={{
-              background: "none",
-              border: "1px solid var(--card-border)",
-              color: "var(--text-muted)",
-              borderRadius: "var(--radius-sm)",
-              padding: "1px 8px",
-              fontSize: "11px",
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-            }}
           >
-            ▶ Expand
-          </button>
+            <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+            Expand
+          </Button>
         </div>
       ) : (
-        /* ── Expanded panel ── */
-        <div id={bodyId}>
-          {/* Header */}
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-            <span style={{ fontSize: "18px" }}>{run.icon}</span>
-            <div style={{ flexGrow: 1 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <strong style={{ fontSize: "13px", color: "#fff" }}>
-                  {run.codename}
-                  {run.isSubAgent && (
-                    <span style={{ fontSize: "10px", color: "#a855f7", marginLeft: "6px", fontWeight: 400 }}>
-                      sub-agent
-                    </span>
-                  )}
-                </strong>
-                {/* Status badge: icon + text, never color alone */}
-                <span
-                  className={`chip ${
-                    run.status === "done" ? "ok" :
-                    run.status === "error" ? "bad" :
-                    run.status === "waiting_human" ? "warn" : "info"
-                  }`}
-                  style={{ fontSize: "10px", display: "flex", alignItems: "center", gap: "4px" }}
-                >
-                  <span
-                    className={`status-dot-live ${statusClass(run.status)}`}
-                    aria-hidden="true"
-                  />
-                  {statusLabel(run.status)}
+        <div id={bodyId} className="space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              {AgentIcon && (
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-subtle)] text-[var(--text-primary)]">
+                  <AgentIcon className="h-4 w-4" aria-hidden="true" />
                 </span>
-                {dur && run.status === "done" && (
-                  <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>{dur}s</span>
-                )}
-              </div>
-              <div style={{ fontSize: "10px", color: "var(--brand)", marginTop: "1px" }}>
-                {run.archetype}
+              )}
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <strong className="text-[13px] text-[var(--text-primary)]">{run.codename}</strong>
+                  {run.isSubAgent && <Badge tone="ai">Sub-Agent</Badge>}
+                  <Badge tone={meta.tone} icon={StatusIcon}>
+                    {meta.label}
+                  </Badge>
+                  {dur && run.status === "done" && (
+                    <span className="text-xs tabular-nums text-[var(--text-muted)]">{dur}s</span>
+                  )}
+                </div>
+                <div className="text-xs text-[var(--text-muted)]">{run.archetype}</div>
               </div>
             </div>
 
-            {/* Collapse button (only if done) */}
-            {run.status === "done" && (
-              <button
-                aria-expanded={true}
-                aria-controls={bodyId}
-                onClick={() => setExpanded(false)}
-                style={{
-                  background: "none",
-                  border: "1px solid var(--card-border)",
-                  color: "var(--text-muted)",
-                  borderRadius: "var(--radius-sm)",
-                  padding: "1px 8px",
-                  fontSize: "11px",
-                  cursor: "pointer",
-                }}
-              >
-                ▲ Collapse
-              </button>
-            )}
-
-            {/* Inspect link */}
-            {onInspect && (
-              <button
-                onClick={() => onInspect(run)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "var(--brand)",
-                  fontSize: "11px",
-                  cursor: "pointer",
-                  textDecoration: "underline",
-                  padding: 0,
-                }}
-              >
-                Inspect 🔍
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {run.status === "done" && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-expanded={true}
+                  aria-controls={bodyId}
+                  onClick={() => setExpanded(false)}
+                >
+                  <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                  Collapse
+                </Button>
+              )}
+              {onInspect && (
+                <Button size="sm" variant="link" onClick={() => onInspect(run)}>
+                  <Search className="h-3.5 w-3.5" aria-hidden="true" />
+                  Inspect
+                </Button>
+              )}
+            </div>
           </div>
 
-          {/* Task checklist (only shown in demo mode — tasks array populated) */}
           {run.tasks && run.tasks.length > 0 && (
-            <div style={{ marginBottom: "10px", paddingLeft: "26px" }}>
+            <ul className="m-0 list-none space-y-1 pl-9 text-xs">
               {run.tasks.map((task, i) => (
-                <div key={i} className={`task-item ${task.done ? "done" : "pending"}`}>
+                <li
+                  key={task.label + i}
+                  className={cn(
+                    "flex items-center gap-2",
+                    task.done ? "text-[var(--ok)] font-medium" : "text-[var(--text-muted)]"
+                  )}
+                >
                   <span aria-hidden="true">{task.done ? "✓" : "○"}</span>
                   <span>{task.label}</span>
-                </div>
+                </li>
               ))}
-            </div>
+            </ul>
           )}
 
-          {/* Error detail */}
           {run.status === "error" && run.errorDetail && (
             <div
-              style={{
-                background: "rgba(239,68,68,0.08)",
-                border: "1px solid rgba(239,68,68,0.3)",
-                borderRadius: "var(--radius-sm)",
-                padding: "8px 10px",
-                fontSize: "12px",
-                color: "var(--bad)",
-                marginBottom: "10px",
-              }}
+              role="alert"
+              className="rounded-[var(--radius-sm)] border border-[var(--bad-border)] bg-[var(--bad-bg)] px-3 py-2 text-xs font-medium text-[var(--bad)]"
             >
-              ⚠ {run.errorDetail}
+              {run.errorDetail}
             </div>
           )}
 
-          {/* waiting_human — Approve / Reject gate (Agent 3 only) */}
           {run.status === "waiting_human" && (
-            <div
-              style={{
-                background: "rgba(245,158,11,0.08)",
-                border: "1px solid rgba(245,158,11,0.3)",
-                borderRadius: "var(--radius-sm)",
-                padding: "10px 14px",
-                marginBottom: "4px",
-              }}
-            >
-              <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--warn)", marginBottom: "8px" }}>
-                ⏳ Needs your approval — review the mapping contract below before proceeding.
+            <div className="rounded-[var(--radius-sm)] border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3.5 py-2.5 space-y-2">
+              <div className="text-xs font-semibold text-[var(--warn)]">
+                Human Governance Gate — review the mapping contract rules below before proceeding.
               </div>
-              <div style={{ display: "flex", gap: "8px" }}>
-                <button
-                  className="primary success"
-                  style={{ padding: "5px 14px", fontSize: "12px" }}
-                  onClick={() => onApprove && onApprove()}
-                >
-                  ✓ Approve Contract
-                </button>
-                <button
-                  className="secondary"
-                  style={{ padding: "5px 14px", fontSize: "12px" }}
-                  onClick={() => {/* rejection is UI-only feedback, no backend */}}
-                >
-                  ✗ Reject
-                </button>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="success" onClick={() => onApprove?.()}>
+                  Approve Contract
+                </Button>
+                {onReject && (
+                  <Button size="sm" variant="secondary" onClick={() => onReject()}>
+                    Review / Edit Rules
+                  </Button>
+                )}
               </div>
             </div>
           )}
 
-          {/* Handoff summary (done) */}
           {run.status === "done" && (
-            <div
-              style={{
-                background: "rgba(16,185,129,0.06)",
-                border: "1px solid rgba(16,185,129,0.2)",
-                borderRadius: "var(--radius-sm)",
-                padding: "6px 10px",
-                fontSize: "11px",
-                color: "#a7f3d0",
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-              }}
-            >
-              <span>📤</span>
-              <span>Passed to next agent: <strong>{run.handoffSummary}</strong></span>
+            <div className="flex items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--ok-border)] bg-[var(--ok-bg)] px-3 py-1.5 text-xs text-[var(--ok)]">
+              <Send className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>
+                Handoff: <strong>{run.handoffSummary}</strong>
+              </span>
             </div>
           )}
         </div>
@@ -267,22 +189,18 @@ function AgentRunPanel({ run, onApprove, onInspect, isSubAgent }) {
   );
 }
 
-// ─── Main Feed Component ──────────────────────────────────────────────────────
-
-export default function AgentLiveFeed({ agentRuns, onApprove, onInspect }) {
+export default function AgentLiveFeed({ agentRuns, onApprove, onReject, onInspect }) {
   const feedRef = useRef(null);
   const [userScrolled, setUserScrolled] = useState(false);
 
-  // Find the latest active panel id (running or waiting_human)
-  const latestActiveId = [...agentRuns].reverse().find(
-    (r) => r.status === "running" || r.status === "waiting_human"
-  )?.id;
+  const latestActiveId = [...agentRuns]
+    .reverse()
+    .find((r) => r.status === "running" || r.status === "waiting_human")?.id;
 
-  // Auto-scroll to latest active panel (Decision Q4)
   useEffect(() => {
     if (!userScrolled && latestActiveId) {
-      const el = document.getElementById("feed-panel-" + latestActiveId);
-      el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      const el = document.getElementById(`feed-panel-${latestActiveId}`);
+      el?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
     }
   }, [latestActiveId, userScrolled]);
 
@@ -292,103 +210,75 @@ export default function AgentLiveFeed({ agentRuns, onApprove, onInspect }) {
     setUserScrolled(!atBottom);
   }, []);
 
-  // Visible runs: not pending, ordered by num
   const visibleRuns = agentRuns.filter((r) => r.status !== "pending");
-
-  // Split: main sequence (non sub-agent) and the self-healer sub-agent
   const mainRuns = visibleRuns.filter((r) => !r.isSubAgent);
   const subAgentRun = visibleRuns.find((r) => r.isSubAgent);
 
-  // Status line for aria-live (Decision Q7)
-  const statusLine = (() => {
-    const active = agentRuns.find((r) => r.status === "running" || r.status === "waiting_human");
-    if (!active) return "";
-    return active.status === "waiting_human"
+  const active = agentRuns.find((r) => r.status === "running" || r.status === "waiting_human");
+  const statusLine = active
+    ? active.status === "waiting_human"
       ? `${active.codename} — Waiting for operator approval`
-      : `${active.codename} — Running`;
-  })();
+      : `${active.codename} — Running`
+    : "";
 
   if (visibleRuns.length === 0) return null;
 
   return (
-    <MotionConfig reducedMotion="user">
-      <div style={{ marginTop: "14px" }}>
-        {/* aria-live status line only (Decision Q7) */}
-        <div
-          aria-live="polite"
-          aria-atomic="true"
-          style={{
-            position: "absolute",
-            width: "1px",
-            height: "1px",
-            overflow: "hidden",
-            clip: "rect(0,0,0,0)",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {statusLine}
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-          <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-            ⚡ Live Run Feed
-          </span>
-          {statusLine && (
-            <span className="chip info" style={{ fontSize: "10px" }}>
-              {statusLine}
-            </span>
-          )}
-        </div>
-
-        <div
-          ref={feedRef}
-          className="agent-run-feed"
-          role="log"
-          aria-label="Live agent execution feed"
-          onScroll={handleScroll}
-        >
-          <AnimatePresence initial={false}>
-            {mainRuns.map((run) => (
-              <motion.div
-                key={run.id}
-                layout
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.25, ease: "easeOut" }}
-              >
-                <AgentRunPanel
-                  run={run}
-                  onApprove={onApprove}
-                  onInspect={onInspect}
-                />
-                {/* Self-Healer sub-panel: render under Agent 4 when error */}
-                {run.id === "agent_4_validation" &&
-                  run.status === "error" &&
-                  subAgentRun && (
-                    <motion.div
-                      key={subAgentRun.id}
-                      layout
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.2, ease: "easeOut", delay: 0.1 }}
-                      style={{ marginTop: "6px" }}
-                    >
-                      <AgentRunPanel
-                        run={subAgentRun}
-                        onApprove={null}
-                        onInspect={onInspect}
-                        isSubAgent
-                      />
-                    </motion.div>
-                  )}
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
+    <div className="pt-3 border-t border-[var(--border-subtle)] space-y-2">
+      <div aria-live="polite" aria-atomic="true" className="sr-only">
+        {statusLine}
       </div>
-    </MotionConfig>
+
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+          Live Agent Run Feed
+        </span>
+        {statusLine && <Badge tone="info">{statusLine}</Badge>}
+      </div>
+
+      <div
+        ref={feedRef}
+        role="log"
+        aria-label="Live agent execution feed"
+        onScroll={handleScroll}
+        className="max-h-[340px] space-y-1.5 overflow-y-auto pr-1 overscroll-contain"
+      >
+        <AnimatePresence initial={false}>
+          {mainRuns.map((run) => (
+            <motion.div
+              key={run.id}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18, ease: [0.23, 1, 0.32, 1] }}
+            >
+              <AgentRunPanel
+                run={run}
+                onApprove={onApprove}
+                onReject={onReject}
+                onInspect={onInspect}
+              />
+              {run.id === "agent_4_validation" && run.status === "error" && subAgentRun && (
+                <motion.div
+                  key={subAgentRun.id}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.16, ease: [0.23, 1, 0.32, 1] }}
+                  className="mt-1.5"
+                >
+                  <AgentRunPanel
+                    run={subAgentRun}
+                    onApprove={null}
+                    onInspect={onInspect}
+                    isSubAgent
+                  />
+                </motion.div>
+              )}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+    </div>
   );
 }
-

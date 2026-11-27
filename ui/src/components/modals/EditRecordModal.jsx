@@ -1,174 +1,21 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
+import { Stethoscope, Sparkles, Plus, X, Save } from "lucide-react";
+import { parseHumanDiagnostic, formatHumanTableRowError } from "@/utils/errorDiagnostics.js";
+import AppDialog from "@/components/ui/Dialog.jsx";
+import Button from "@/components/ui/Button.jsx";
+import Badge from "@/components/ui/Badge.jsx";
+import { cn } from "@/utils/cn.js";
 
-export function parseHumanDiagnostic(rawErr, rowData = {}, sourceId = "") {
-  if (!rawErr) return null;
-  const str = String(rawErr);
+export { parseHumanDiagnostic, formatHumanTableRowError };
 
-  // 1. Missing required source field (e.g. missing required source field 'memid')
-  if (str.includes("missing required source field") || str.includes("missing required field")) {
-    const match = str.match(/'([^']+)'/);
-    const missingCol = match ? match[1] : "memid";
-    const suggested = sourceId && sourceId !== "—" ? sourceId : `MEM-${Date.now().toString().slice(-6)}`;
-    return {
-      field: missingCol,
-      col: missingCol,
-      title: `Missing Required Field: '${missingCol}'`,
-      explanation: `The mapping contract requires field '${missingCol}' to generate a valid FHIR R4 resource, but this record is missing '${missingCol}'.`,
-      badValue: "Missing / Null",
-      suggestedFix: suggested,
-      aiInstructions: [
-        `1. Click the '✨ Add & Populate ${missingCol}' button below to apply '${suggested}'.`,
-        `2. Or enter a unique ID in the '${missingCol}' input field below.`,
-        "3. Click '💾 Save & Re-Validate Record' to certify the record.",
-      ],
-    };
-  }
-
-  // 2. Boolean mapping lookup error (e.g. 'issubscriber' -> 'extension[11].valueBoolean' (map): no mapping for value 'Y'/'N')
-  if (str.includes("no mapping for value")) {
-    const matchVal = str.match(/no mapping for value '([^']+)'/);
-    const badVal = matchVal ? matchVal[1] : "";
-    const colMatch = str.match(/'([^']+)'\s*->/);
-    const col = colMatch ? colMatch[1] : "issubscriber";
-    let suggested = null;
-    const upper = badVal.toUpperCase();
-    if (upper === "Y" || upper === "1" || upper === "TRUE") suggested = "true";
-    if (upper === "N" || upper === "0" || upper === "FALSE") suggested = "false";
-
-    return {
-      field: col,
-      col: col,
-      title: `Boolean Code Mapping Notice (${col})`,
-      explanation: `The mapping rule for '${col}' has transform 'map' without dictionary lookup rules for '${badVal}'. FHIR R4 booleans expect 'true' or 'false'.`,
-      badValue: badVal,
-      suggestedFix: suggested,
-      aiInstructions: [
-        suggested
-          ? `1. Click '✨ Apply Fix: '${suggested}'' below to normalize '${badVal}' to '${suggested}'.`
-          : `1. Change value to 'true' or 'false'.`,
-        "2. Or in Step 2: change transform to 'direct' so FHIR boolean coercion handles 'Y'/'N' automatically.",
-        "3. Click '💾 Save & Re-Validate Record'.",
-      ],
-    };
-  }
-
-  // 3. Date format error (e.g. birthDate; Value error, Date value string does not match spec regex. [input_value='1985-15-06'])
-  if (str.includes("birthDate") || (str.includes("Date value") && str.includes("regex"))) {
-    const valMatch = str.match(/input_value='([^']+)'/);
-    const badVal = valMatch ? valMatch[1] : "";
-
-    // Check if swapped YYYY-DD-MM (e.g. 1985-15-06)
-    const swapMatch = badVal.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
-    let suggestion = null;
-    let explanation = `The date '${badVal}' does not match standard FHIR R4 format (YYYY-MM-DD). Month must be between 01 and 12.`;
-
-    if (swapMatch) {
-      const y = swapMatch[1];
-      const p1 = parseInt(swapMatch[2], 10);
-      const p2 = parseInt(swapMatch[3], 10);
-      if (p1 > 12 && p2 <= 12) {
-        suggestion = `${y}-${String(p2).padStart(2, "0")}-${String(p1).padStart(2, "0")}`;
-        explanation = `The month and day are swapped ('${badVal}'). In FHIR R4, month '${p1}' is invalid because months only go up to 12. Swapping month and day yields '${suggestion}' (June 15, ${y}).`;
-      }
-    }
-
-    const matchingCol = Object.keys(rowData).find(
-      (k) =>
-        rowData[k] === badVal ||
-        k.toLowerCase() === "dob" ||
-        k.toLowerCase().includes("birthdate") ||
-        k.toLowerCase().includes("date")
-    );
-
-    return {
-      field: "birthDate",
-      col: matchingCol || "dob",
-      title: "Date of Birth Format Violation",
-      explanation: explanation,
-      badValue: badVal,
-      suggestedFix: suggestion || "YYYY-MM-DD",
-      aiInstructions: [
-        `1. Check the date value '${badVal}' in the '${matchingCol || "dob"}' field.`,
-        suggestion
-          ? `2. Swap month and day: click the button below to apply '${suggestion}'.`
-          : "2. Ensure the format is strictly YYYY-MM-DD (e.g. 1985-06-15).",
-        "3. Click '💾 Save & Re-Validate Record' to certify and promote the record to validated.",
-      ],
-    };
-  }
-
-  // 4. DateTime missing timezone (e.g. deceasedDateTime)
-  if (str.includes("deceasedDateTime") || str.includes("DateTime value")) {
-    const valMatch = str.match(/input_value='([^']+)'/);
-    const badVal = valMatch ? valMatch[1] : "";
-    const cleanDate = badVal.split("T")[0];
-    const suggestion = cleanDate || "YYYY-MM-DD";
-
-    const matchingCol = Object.keys(rowData).find(
-      (k) =>
-        rowData[k] === badVal ||
-        k.toLowerCase().includes("death") ||
-        k.toLowerCase().includes("date")
-    );
-
-    return {
-      field: "deceasedDateTime",
-      col: matchingCol || "deathdate",
-      title: "DateTime Format Notice (Missing Timezone)",
-      explanation: `FHIR R4 dateTime requires an explicit UTC timezone offset ('Z' or '+00:00') if time is specified, or a clean date (YYYY-MM-DD). Value '${badVal}' has no timezone.`,
-      badValue: badVal,
-      suggestedFix: suggestion,
-      aiInstructions: [
-        `1. Format date as clean '${suggestion}' (without naive midnight time).`,
-        `2. Or append 'Z' for UTC offset: '${badVal ? badVal + "Z" : "YYYY-MM-DDTHH:MM:SSZ"}'.`,
-        "3. Click '💾 Save & Re-Validate Record'.",
-      ],
-    };
-  }
-
-  // 5. Choice type collision (e.g. multipleBirth)
-  if (str.includes("Any of one field value is expected from this list")) {
-    return {
-      field: "multipleBirth",
-      col: "multiplebirth",
-      title: "Conflicting Choice Attributes",
-      explanation: "FHIR R4 choice elements allow only one variant (e.g. multipleBirthBoolean OR multipleBirthInteger), not both.",
-      badValue: "Multiple choice types present",
-      suggestedFix: "true",
-      aiInstructions: [
-        "1. Keep multipleBirthBoolean as a boolean true/false.",
-        "2. Clear integer counts or move them to an extension.",
-        "3. Click '💾 Save & Re-Validate Record'.",
-      ],
-    };
-  }
-
-  // Fallback
-  const cleanMsg = str.replace(/https:\/\/errors\.pydantic\.dev[^\s]*/g, "").trim();
-  return {
-    field: "general",
-    col: null,
-    title: "Validation Violation",
-    explanation: cleanMsg,
-    badValue: "",
-    suggestedFix: null,
-    aiInstructions: [
-      "1. Verify field value against FHIR R4 schema constraints.",
-      "2. Correct any misformatted numbers, dates, or invalid enum codes.",
-      "3. Click '💾 Save & Re-Validate Record'.",
-    ],
-  };
-}
-
-export function formatHumanTableRowError(rawErr, sourceId = "") {
-  if (!rawErr) return "";
-  const diag = parseHumanDiagnostic(rawErr, {}, sourceId);
-  if (!diag) return String(rawErr);
-  if (diag.suggestedFix && diag.suggestedFix !== "YYYY-MM-DD") {
-    return `⚠️ ${diag.field}: ${diag.title}. AI Auto-Fix: '${diag.suggestedFix}'`;
-  }
-  return `⚠️ ${diag.title}: ${diag.explanation.slice(0, 110)}…`;
-}
+const METADATA_KEYS = new Set([
+  "#",
+  "Original Row",
+  "Error Classification",
+  "Source Identifier",
+  "Violations / Errors",
+  "Remediation Guidance",
+]);
 
 export default function EditRecordModal({
   editingRow,
@@ -178,33 +25,34 @@ export default function EditRecordModal({
   onSave,
 }) {
   const [formData, setFormData] = useState({});
+  const [initialSnapshot, setInitialSnapshot] = useState("{}");
   const [localError, setLocalError] = useState("");
   const [newFieldName, setNewFieldName] = useState("");
   const [showAddField, setShowAddField] = useState(false);
 
-  // Synchronize form fields whenever a row is selected for editing
   useEffect(() => {
     if (editingRow) {
       const initial = { ...(editingRow.data || {}) };
-      // Include any columns from the dataset headers so missing fields are visible as inputs
       (headers || []).forEach((h) => {
-        if (!(h in initial)) {
-          initial[h] = "";
-        }
+        if (!(h in initial)) initial[h] = "";
       });
       setFormData(initial);
+      setInitialSnapshot(JSON.stringify(initial));
       setLocalError(editingError || "");
       setNewFieldName("");
       setShowAddField(false);
     }
   }, [editingRow, editingError, headers]);
 
-  if (!editingRow) return null;
+  const isDirty = useMemo(
+    () => Boolean(editingRow) && JSON.stringify(formData) !== initialSnapshot,
+    [editingRow, formData, initialSnapshot]
+  );
 
   const activeDiagError =
-    localError || (editingRow.errors && editingRow.errors.length > 0 ? editingRow.errors[0] : null);
+    localError || (editingRow?.errors && editingRow.errors.length > 0 ? editingRow.errors[0] : null);
   const diagnostic = activeDiagError
-    ? parseHumanDiagnostic(activeDiagError, formData, editingRow.sourceId)
+    ? parseHumanDiagnostic(activeDiagError, formData, editingRow?.sourceId)
     : null;
 
   const handleApplyAutoFix = (suggestedValue, targetCol) => {
@@ -224,10 +72,11 @@ export default function EditRecordModal({
     }
   };
 
-  const handleAddNewField = () => {
+  const handleAddNewField = (e) => {
+    e?.preventDefault();
     const trimmed = newFieldName.trim();
     if (!trimmed) return;
-    setFormData((prev) => ({ ...prev, [trimmed]: "" }));
+    setFormData((prev) => ({ ...prev, [trimmed]: prev[trimmed] ?? "" }));
     setNewFieldName("");
     setShowAddField(false);
   };
@@ -240,231 +89,208 @@ export default function EditRecordModal({
     });
   };
 
-  const handleSave = () => {
-    onSave(formData);
-  };
+  const formKeys = Object.keys(formData).filter((k) => !METADATA_KEYS.has(k));
 
-  const formKeys = Object.keys(formData);
+  const footerErrorSummary = diagnostic
+    ? `${diagnostic.col || diagnostic.field}: ${diagnostic.badValue ? `"${diagnostic.badValue}"` : diagnostic.title}`
+    : activeDiagError || "";
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-box" style={{ maxWidth: "780px" }} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span style={{ fontSize: "20px" }}>✏️</span>
-            <div>
-              <h3 style={{ margin: 0, fontSize: "16px" }}>
-                In-Place Edit Record: <code>{editingRow.sourceId || `#${(editingRow.index ?? 0) + 1}`}</code>
-              </h3>
-              <span className="sub-meta">Remediate source data attributes and trigger live FHIR re-validation</span>
-            </div>
-          </div>
-          <button className="secondary sm" onClick={onClose}>✕ Close</button>
-        </div>
-
-        {/* AI Human-Readable Diagnostic Assistant */}
-        {diagnostic && (
-          <div
-            style={{
-              margin: "14px 20px 0",
-              padding: "14px 16px",
-              background: "linear-gradient(135deg, rgba(239, 68, 68, 0.12) 0%, rgba(245, 158, 11, 0.12) 100%)",
-              border: "1px solid rgba(239, 68, 68, 0.4)",
-              borderRadius: "var(--radius-sm)",
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px", flexWrap: "wrap" }}>
-              <div style={{ flex: 1, minWidth: "260px" }}>
-                <div style={{ color: "#f87171", fontWeight: 700, fontSize: "13px", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <span>🩺 Clinical Validation Notice:</span>
-                  <span>{diagnostic.title}</span>
-                </div>
-                <p style={{ margin: "6px 0 0", fontSize: "12px", color: "var(--text)", lineHeight: 1.5 }}>
-                  {diagnostic.explanation}
-                </p>
-              </div>
-              {diagnostic.suggestedFix && diagnostic.suggestedFix !== "YYYY-MM-DD" && (
-                <button
-                  className="primary sm"
-                  onClick={() => handleApplyAutoFix(diagnostic.suggestedFix, diagnostic.col)}
-                  style={{
-                    background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                    borderColor: "rgba(16, 185, 129, 0.5)",
-                    fontWeight: 600,
-                    whiteSpace: "nowrap",
-                    boxShadow: "0 2px 8px rgba(16, 185, 129, 0.3)",
-                  }}
-                  title={`Click to automatically apply ${diagnostic.suggestedFix} to ${diagnostic.col}`}
-                >
-                  ✨ Apply Fix: &apos;{diagnostic.suggestedFix}&apos;
-                </button>
-              )}
-            </div>
-
-            {/* AI Step-by-Step Instructions */}
-            <div style={{ marginTop: "10px", paddingTop: "8px", borderTop: "1px dashed rgba(255, 255, 255, 0.15)", fontSize: "11px" }}>
-              <strong style={{ color: "#fcd34d", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                💡 AI Instructions to Save &amp; Certify:
-              </strong>
-              <ul style={{ margin: "4px 0 0", paddingLeft: "16px", color: "var(--text)" }}>
-                {diagnostic.aiInstructions.map((inst, idx) => (
-                  <li key={idx} style={{ marginTop: "2px" }}>{inst}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        )}
-
-        {/* Toolbar: Record Field Count & Add Field Action */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            padding: "10px 20px 0",
-            flexWrap: "wrap",
-            gap: "10px",
-          }}
-        >
-          <span style={{ fontSize: "12px", color: "var(--muted)" }}>
-            Record Attributes: <strong>{formKeys.length} Fields</strong>
+    <AppDialog
+      open={Boolean(editingRow)}
+      onClose={onClose}
+      dirty={isDirty}
+      maxWidth="780px"
+      title={
+        editingRow ? (
+          <span>
+            In-Place Edit Record:{" "}
+            <code className="text-[var(--brand)]">
+              {editingRow.sourceId || `#${(editingRow.index ?? 0) + 1}`}
+            </code>
           </span>
-
-          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-            {!showAddField ? (
-              <button
-                className="secondary sm"
-                onClick={() => setShowAddField(true)}
-                style={{ fontSize: "11px", padding: "4px 10px" }}
+        ) : (
+          "Edit Record"
+        )
+      }
+      subtitle="Fix highlighted fields and re-validate"
+      footer={
+        <div className="flex w-full flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0 flex-1 text-left">
+            {footerErrorSummary && (
+              <span
+                role="status"
+                title={diagnostic?.explanation || footerErrorSummary}
+                className="inline-flex max-w-full items-center gap-1.5 truncate rounded-[var(--radius-sm)] border border-[var(--bad-border)] bg-[var(--bad-bg)] px-2.5 py-1 text-xs font-semibold text-[var(--bad)]"
               >
-                ➕ Add Field to Record
-              </button>
-            ) : (
-              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                <input
-                  type="text"
-                  placeholder="Field name (e.g. memid, ssn)..."
-                  value={newFieldName}
-                  onChange={(e) => setNewFieldName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleAddNewField();
-                    if (e.key === "Escape") setShowAddField(false);
-                  }}
-                  autoFocus
-                  style={{ padding: "4px 8px", fontSize: "12px", width: "180px" }}
-                />
-                <button
-                  className="primary sm"
-                  onClick={handleAddNewField}
-                  disabled={!newFieldName.trim()}
-                  style={{ fontSize: "11px", padding: "4px 8px" }}
-                >
-                  Add
-                </button>
-                <button
-                  className="secondary sm"
-                  onClick={() => setShowAddField(false)}
-                  style={{ fontSize: "11px", padding: "4px 6px" }}
-                >
-                  ✕
-                </button>
-              </div>
+                {footerErrorSummary}
+              </span>
             )}
           </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button variant="secondary" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" form="edit-record-form">
+              <Save className="h-3.5 w-3.5" aria-hidden="true" />
+              Save &amp; Re-Validate
+            </Button>
+          </div>
         </div>
+      }
+    >
+      {editingRow && (
+        <div className="space-y-4">
+          {/* Clinical Validation Diagnostic Box */}
+          {diagnostic && (
+            <div
+              role="alert"
+              className="rounded-[var(--radius-md)] border border-[var(--bad-border)] bg-[var(--bad-bg)] p-4 space-y-2.5"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-1 flex-1 min-w-[240px]">
+                  <div className="flex items-center gap-2 text-xs font-bold text-[var(--bad)]">
+                    <Stethoscope className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    <span>Clinical Validation Notice: {diagnostic.title}</span>
+                  </div>
+                  <p className="m-0 text-xs leading-relaxed text-[var(--text-primary)]">
+                    {diagnostic.explanation}
+                  </p>
+                </div>
 
-        {/* Form Fields Grid */}
-        <div className="modal-body" style={{ maxHeight: "55vh", overflowY: "auto", padding: "12px 20px 20px" }}>
-          {formKeys.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "20px", color: "var(--muted)" }}>
-              No fields found in this record. Click &ldquo;➕ Add Field to Record&rdquo; above to add fields.
+                {diagnostic.suggestedFix && diagnostic.suggestedFix !== "YYYY-MM-DD" && (
+                  <Button
+                    size="sm"
+                    variant="success"
+                    onClick={() => handleApplyAutoFix(diagnostic.suggestedFix, diagnostic.col)}
+                  >
+                    <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                    Apply Fix: {diagnostic.suggestedFix}
+                  </Button>
+                )}
+              </div>
+
+              <div className="border-t border-[var(--bad-border)] pt-2 text-xs text-[var(--text-secondary)]">
+                <strong className="text-[var(--text-primary)]">Remediation Steps:</strong>
+                <ul className="m-0 mt-1 list-disc pl-4 space-y-0.5">
+                  {diagnostic.aiInstructions.map((inst, idx) => (
+                    <li key={idx}>{inst}</li>
+                  ))}
+                </ul>
+              </div>
             </div>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+          )}
+
+          {/* Field Count & Add Field Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs text-[var(--text-muted)] tabular-nums">
+              Record Attributes: <strong className="text-[var(--text-primary)]">{formKeys.length} Fields</strong>
+            </span>
+
+            {!showAddField ? (
+              <Button size="sm" variant="secondary" onClick={() => setShowAddField(true)}>
+                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                Add Field to Record
+              </Button>
+            ) : (
+              <form onSubmit={handleAddNewField} className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  aria-label="New field name"
+                  placeholder="Field name (e.g. memid)"
+                  value={newFieldName}
+                  onChange={(e) => setNewFieldName(e.target.value)}
+                  autoFocus
+                  className="h-[30px] w-[180px] rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-2.5 text-xs"
+                />
+                <Button size="sm" variant="primary" type="submit" disabled={!newFieldName.trim()}>
+                  Add
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label="Cancel adding field"
+                  onClick={() => setShowAddField(false)}
+                >
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
+                </Button>
+              </form>
+            )}
+          </div>
+
+          {/* Fields Form */}
+          <form
+            id="edit-record-form"
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              onSave(formData);
+            }}
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
               {formKeys.map((col) => {
                 const isErrCol = (editingRow.errors || []).some((err) =>
                   err.toLowerCase().includes(col.toLowerCase())
-                );
+                ) || diagnostic?.col === col;
                 const isMissing = !formData[col] && isErrCol;
+                const inputId = `edit-field-${col}`;
 
                 return (
                   <div
                     key={col}
-                    style={{
-                      position: "relative",
-                      background: isErrCol ? "rgba(239, 68, 68, 0.05)" : "rgba(255, 255, 255, 0.02)",
-                      padding: "8px 10px",
-                      borderRadius: "6px",
-                      border: isErrCol ? "1px solid rgba(239, 68, 68, 0.4)" : "1px solid rgba(255, 255, 255, 0.05)",
-                    }}
+                    className={cn(
+                      "rounded-[var(--radius-sm)] border p-2.5 space-y-1.5",
+                      isErrCol
+                        ? "border-[var(--bad-border)] bg-[var(--bad-bg)]/50"
+                        : "border-[var(--border-default)] bg-[var(--bg-subtle)]/50"
+                    )}
                   >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                      <label
-                        style={{
-                          fontSize: "11px",
-                          fontWeight: 700,
-                          color: isErrCol ? "#f87171" : "var(--muted)",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "4px",
-                        }}
-                      >
-                        <span>{col}</span>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <label
+                          htmlFor={inputId}
+                          className={cn(
+                            "text-xs font-semibold font-mono",
+                            isErrCol ? "text-[var(--bad)]" : "text-[var(--text-secondary)]"
+                          )}
+                        >
+                          {col}
+                        </label>
                         {isErrCol && (
-                          <span
-                            className="chip bad"
-                            style={{ fontSize: "9px", padding: "1px 4px", fontWeight: 700 }}
-                          >
-                            {isMissing ? "⚠️ Missing Field" : "⚠️ Error"}
-                          </span>
+                          <Badge tone="bad">{isMissing ? "Missing" : "Invalid"}</Badge>
                         )}
-                      </label>
-
+                      </div>
                       <button
-                        className="secondary sm"
+                        type="button"
+                        aria-label={`Remove field ${col}`}
                         onClick={() => handleRemoveField(col)}
-                        title={`Remove field '${col}'`}
-                        style={{
-                          padding: "1px 4px",
-                          fontSize: "10px",
-                          color: "var(--muted)",
-                          border: "none",
-                          background: "transparent",
-                          cursor: "pointer",
-                        }}
+                        className="rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--bad)] cursor-pointer"
                       >
-                        ✕
+                        <X className="h-3.5 w-3.5" aria-hidden="true" />
                       </button>
                     </div>
 
                     <input
+                      id={inputId}
                       type="text"
+                      aria-invalid={isErrCol ? "true" : undefined}
                       value={formData[col] ?? ""}
-                      placeholder={`Enter ${col}...`}
-                      onChange={(e) => setFormData({ ...formData, [col]: e.target.value })}
-                      style={{
-                        width: "100%",
-                        padding: "6px 8px",
-                        fontSize: "12px",
-                        borderColor: isErrCol ? "rgba(239, 68, 68, 0.6)" : undefined,
-                        background: isErrCol ? "rgba(239, 68, 68, 0.1)" : undefined,
-                        borderRadius: "4px",
-                      }}
+                      placeholder={`Enter ${col}…`}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, [col]: e.target.value }))
+                      }
+                      className={cn(
+                        "h-[32px] w-full rounded-[var(--radius-sm)] border bg-[var(--bg-surface)] px-2.5 text-xs font-mono",
+                        isErrCol ? "border-[var(--bad)]" : "border-[var(--border-default)]"
+                      )}
                     />
                   </div>
                 );
               })}
             </div>
-          )}
+          </form>
         </div>
-
-        <div className="modal-header" style={{ borderTop: "1px solid var(--card-border)", justifyContent: "flex-end", gap: "10px" }}>
-          <button className="secondary" onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={handleSave}>
-            💾 Save &amp; Re-Validate Record
-          </button>
-        </div>
-      </div>
-    </div>
+      )}
+    </AppDialog>
   );
 }

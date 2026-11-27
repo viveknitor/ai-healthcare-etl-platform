@@ -11,6 +11,7 @@ from .logging_setup import get_logger
 from .mapping.engine import apply_mapping
 from .mapping.models import MappingConfig
 from .pipeline import RecordResult, extract_clinical_summary, generate_dynamic_reconciliation
+from .telemetry import telemetry
 from .validation import validate_fhir
 
 log = get_logger("upload_pipeline")
@@ -274,6 +275,7 @@ def ingest_uploaded_records(
 ) -> dict:
     """Transforms and ingests rows into FHIR resources via an approved mapping,
     delivering directly to Medplum with dynamic reconciliation tracking and adaptive pacing."""
+    t0 = time.perf_counter()
     system = f"urn:source:{dataset_name.lower().replace(' ', '-')}"
     results: list[RecordResult] = []
     should_pace = (not dry_run) and (medplum is not None) and (len(rows) > 200) and (pacing_delay_ms > 0)
@@ -297,6 +299,19 @@ def ingest_uploaded_records(
     counts["created"] = created_count
     counts["updated"] = updated_count
 
+    delivered = counts.get("delivered", 0)
+    dry_run_cnt = counts.get("dry_run", 0)
+    invalid_cnt = counts.get("invalid", 0)
+    telemetry.record_run(
+        source=f"batch:{dataset_name}",
+        total=len(results),
+        valid=delivered + dry_run_cnt,
+        invalid=invalid_cnt,
+        delivered=delivered,
+        dry_run=dry_run,
+        duration_sec=time.perf_counter() - t0,
+    )
+
     return {
         "summary": {"total": len(results), "counts": counts},
         "results": [asdict(r) for r in results],
@@ -312,6 +327,7 @@ def stream_uploaded_records(
     pacing_delay_ms: float = 12.0,
 ):
     """Yields progress events row-by-row via Server-Sent Events (SSE) with adaptive micro-pacing for large batches."""
+    t0 = time.perf_counter()
     system = f"urn:source:{dataset_name.lower().replace(' ', '-')}"
     counts = {"delivered": 0, "dry_run": 0, "invalid": 0, "failed": 0, "created": 0, "updated": 0}
     should_pace = (not dry_run) and (medplum is not None) and (len(rows) > 200) and (pacing_delay_ms > 0)
@@ -335,6 +351,16 @@ def stream_uploaded_records(
 
         if should_pace and i < len(rows) - 1:
             time.sleep(pacing_delay_ms / 1000.0)
+
+    telemetry.record_run(
+        source=f"stream:{dataset_name}",
+        total=len(rows),
+        valid=counts.get("delivered", 0) + counts.get("dry_run", 0),
+        invalid=counts.get("invalid", 0),
+        delivered=counts.get("delivered", 0),
+        dry_run=dry_run,
+        duration_sec=time.perf_counter() - t0,
+    )
 
     yield {
         "type": "complete",

@@ -1,5 +1,28 @@
-import React, { useState, useMemo } from "react";
-import ReconciliationTable from "../ReconciliationTable.jsx";
+import React, { useState, useMemo, useEffect } from "react";
+import {
+  GitCompare,
+  Database,
+  Braces,
+  ExternalLink,
+  Copy,
+  Check,
+  CheckCircle2,
+  AlertCircle,
+  Zap,
+} from "lucide-react";
+import { api } from "@/api.js";
+import ReconciliationTable from "@/components/ReconciliationTable.jsx";
+import AppDialog from "@/components/ui/Dialog.jsx";
+import SegmentedTabs from "@/components/ui/Tabs.jsx";
+import Badge from "@/components/ui/Badge.jsx";
+import Button from "@/components/ui/Button.jsx";
+
+const STATUS_TONE = {
+  delivered: "ok",
+  dry_run: "brand",
+  invalid: "bad",
+  failed: "bad",
+};
 
 export default function InspectRecordModal({
   activeRecord,
@@ -8,10 +31,54 @@ export default function InspectRecordModal({
   onClose,
   copyPayload,
   copiedKey,
+  sourceLabel = "Source Record",
+  enableDestinationTab = true,
 }) {
-  const [modalTab, setModalTab] = useState("recon"); // "recon" | "raw"
+  const [modalTab, setModalTab] = useState("recon");
+  const [liveData, setLiveData] = useState(null);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveError, setLiveError] = useState("");
+  const [localCopiedKey, setLocalCopiedKey] = useState("");
 
-  // Dynamically ensure reconciliation table is always available even for quarantined records
+  useEffect(() => {
+    if (activeRecord) {
+      setModalTab("recon");
+      setLiveData(null);
+      setLiveError("");
+      setLocalCopiedKey("");
+    }
+  }, [activeRecord]);
+
+  const handleCopy = async (key, payload) => {
+    if (copyPayload) {
+      copyPayload(key, payload);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(payload || {}, null, 2));
+      setLocalCopiedKey(key);
+      setTimeout(() => setLocalCopiedKey(""), 2000);
+    } catch {
+      // Clipboard blocked
+    }
+  };
+
+  const activeCopiedKey = copiedKey ?? localCopiedKey;
+
+  const verifyLiveDestination = async () => {
+    if (!activeRecord?.target_id) return;
+    setLiveLoading(true);
+    setLiveError("");
+    try {
+      const res = await api.getLiveMedplumResource(targetResource, activeRecord.target_id);
+      setLiveData(res.resource);
+    } catch (err) {
+      setLiveError(err.message);
+    } finally {
+      setLiveLoading(false);
+    }
+  };
+
   const reconciliationData = useMemo(() => {
     if (activeRecord?.reconciliation_table && activeRecord.reconciliation_table.length > 0) {
       return activeRecord.reconciliation_table;
@@ -77,7 +144,7 @@ export default function InspectRecordModal({
       let ruleDesc = `Unmapped in destination payload (${rule.source} -> ${rule.target})`;
       if (srcVal === undefined || srcVal === null || srcVal === "") {
         status = "empty";
-        ruleDesc = `Source field empty in record (${rule.source} -> ${rule.target})`;
+        ruleDesc = `Source field empty (${rule.source} -> ${rule.target})`;
       } else if (tgtVal !== undefined) {
         if (String(srcVal).trim() === String(tgtVal).trim()) {
           status = "preserved";
@@ -90,22 +157,21 @@ export default function InspectRecordModal({
 
       matrix.push({
         field: rule.source,
-        label: `${rule.source} (${rule.source})`,
+        label: rule.source,
         source_raw: srcVal,
         source_display: srcDisp,
         rule: ruleDesc,
-        status: status,
+        status,
         target_raw: tgtVal,
         target_display: tgtDisp,
       });
     });
 
-    // Capture unmapped raw columns
     Object.keys(src).forEach((col) => {
       if (!mappedSources.has(col)) {
         matrix.push({
           field: col,
-          label: `${col} (${col})`,
+          label: col,
           source_raw: src[col],
           source_display: String(src[col] || "—"),
           rule: `Unmapped source column (omitted from ${targetResource || "Patient"} FHIR payload)`,
@@ -119,85 +185,220 @@ export default function InspectRecordModal({
     return matrix;
   }, [activeRecord, mapping, targetResource]);
 
-  if (!activeRecord) return null;
+  const tabItems = [
+    { value: "recon", label: "Reconciliation Matrix", icon: GitCompare },
+    ...(enableDestinationTab
+      ? [{ value: "dest", label: "Destination DB Perspective", icon: Database }]
+      : []),
+    { value: "raw", label: "Raw JSON Payloads", icon: Braces },
+  ];
+
+  const deliveryAction = activeRecord?.mapping_details?.delivery_action;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <div>
-            <h3 style={{ margin: 0, fontSize: "16px" }}>
-              🔍 Record Inspector: <code>{activeRecord.source_id}</code>
-            </h3>
-            <span className="sub-meta">FHIR R4 Resource Lineage &amp; Dynamic Reconciliation</span>
-          </div>
-
-          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-            {activeRecord.target_id && (
-              <a
-                href={`http://localhost:3000/${targetResource}/${activeRecord.target_id}`}
-                target="_blank"
-                rel="noreferrer"
-                className="target-link"
-                style={{ fontSize: "12px", padding: "4px 10px" }}
-              >
-                Open in Medplum Portal ↗
-              </a>
+    <AppDialog
+      open={Boolean(activeRecord)}
+      onClose={onClose}
+      maxWidth="1120px"
+      title={
+        activeRecord ? (
+          <span className="flex flex-wrap items-center gap-2">
+            <span>
+              Record Inspector: <code className="text-[var(--brand)]">{activeRecord.source_id}</code>
+            </span>
+            <Badge tone={STATUS_TONE[activeRecord.status] || "neutral"}>
+              {activeRecord.status === "dry_run" ? "validated" : activeRecord.status}
+            </Badge>
+            {deliveryAction && (
+              <Badge tone={deliveryAction === "created" ? "ok" : "info"}>
+                {deliveryAction}
+              </Badge>
             )}
-            <button className="secondary sm" onClick={onClose}>
-              ✕ Close
-            </button>
-          </div>
-        </div>
-
-        <div className="modal-tabs">
-          <button
-            className={`modal-tab-btn ${modalTab === "recon" ? "active" : ""}`}
-            onClick={() => setModalTab("recon")}
+          </span>
+        ) : (
+          "Record Inspector"
+        )
+      }
+      subtitle={`HL7 FHIR R4 Resource Lineage (${targetResource})`}
+      headerRight={
+        activeRecord?.target_id ? (
+          <a
+            href={`http://localhost:3000/${targetResource}/${activeRecord.target_id}`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--brand)] hover:underline"
           >
-            <span>🔄</span> Dynamic Reconciliation Matrix
-          </button>
-          <button
-            className={`modal-tab-btn ${modalTab === "raw" ? "active" : ""}`}
-            onClick={() => setModalTab("raw")}
-          >
-            <span>📄</span> Raw JSON Payloads
-          </button>
-        </div>
+            <span>Open in Medplum</span>
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          </a>
+        ) : null
+      }
+    >
+      {activeRecord && (
+        <div className="space-y-4">
+          <SegmentedTabs
+            ariaLabel="Inspector perspective"
+            value={modalTab}
+            onChange={setModalTab}
+            items={tabItems}
+          />
 
-        <div className="modal-body" style={{ maxHeight: "65vh", overflowY: "auto" }}>
           {modalTab === "recon" && (
             <ReconciliationTable
               table={reconciliationData}
-              sourceTitle="Source Uploaded Record"
+              sourceTitle={sourceLabel}
               targetTitle={`Target ${targetResource} Stored`}
             />
           )}
 
-          {modalTab === "raw" && (
-            <div className="grid2">
-              <div className="pane">
-                <div className="row between" style={{ margin: "0 0 8px" }}>
-                  <h4 style={{ margin: 0 }}>Source Row</h4>
-                  <button className="secondary sm" onClick={() => copyPayload("src", activeRecord.source_record)}>
-                    {copiedKey === "src" ? "✓ Copied" : "Copy Source"}
-                  </button>
+          {modalTab === "dest" && (
+            <div className="space-y-4">
+              <div className="grid gap-3 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4 sm:grid-cols-2 lg:grid-cols-4 text-xs">
+                <div>
+                  <div className="text-[var(--text-muted)] font-semibold">Target Resource</div>
+                  <div className="mt-0.5 font-mono font-bold text-[var(--text-primary)]">{targetResource}</div>
                 </div>
-                <pre>{JSON.stringify(activeRecord.source_record, null, 2)}</pre>
+                <div>
+                  <div className="text-[var(--text-muted)] font-semibold">Assigned UUID</div>
+                  <div className="mt-0.5 font-mono font-bold text-[var(--text-primary)] break-all">
+                    {activeRecord.target_id || "Pending Commit"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[var(--text-muted)] font-semibold">Scoped Identifier</div>
+                  <div className="mt-0.5 font-mono font-bold text-[var(--text-primary)] break-all">
+                    {activeRecord.mapping_details?.idempotent_identifier || "—"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[var(--text-muted)] font-semibold">Delivery Action</div>
+                  <div className="mt-0.5 font-mono font-bold text-[var(--ok)]">
+                    {activeRecord.status.toUpperCase()} ({deliveryAction || "ready"})
+                  </div>
+                </div>
               </div>
-              <div className="pane">
-                <div className="row between" style={{ margin: "0 0 8px" }}>
-                  <h4 style={{ margin: 0 }}>Target Medplum Resource</h4>
-                  <button className="secondary sm" onClick={() => copyPayload("tgt", activeRecord.target_record)}>
-                    {copiedKey === "tgt" ? "✓ Copied" : "Copy Target"}
-                  </button>
+
+              {activeRecord.target_id ? (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3">
+                    <div className="text-xs">
+                      <strong className="text-[var(--text-primary)]">Live Database Verification</strong>
+                      <div className="text-[var(--text-muted)]">
+                        Query Medplum PostgreSQL store directly to confirm live persisted version and timestamp.
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      loading={liveLoading}
+                      onClick={verifyLiveDestination}
+                    >
+                      <Zap className="h-3.5 w-3.5" aria-hidden="true" />
+                      {liveLoading ? "Querying Medplum…" : "Verify Live in Medplum DB"}
+                    </Button>
+                  </div>
+
+                  {liveError && (
+                    <div
+                      role="alert"
+                      className="flex items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--bad-border)] bg-[var(--bad-bg)] px-3.5 py-2.5 text-xs text-[var(--bad)]"
+                    >
+                      <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      <span>Verification failed: {liveError}</span>
+                    </div>
+                  )}
+
+                  {liveData && (
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-md)] border border-[var(--ok-border)] bg-[var(--ok-bg)] px-4 py-3 text-xs">
+                      <div>
+                        <div className="flex items-center gap-1.5 font-bold text-[var(--ok)]">
+                          <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                          <span>Confirmed Live in Medplum Database</span>
+                        </div>
+                        <div className="mt-0.5 font-mono text-[var(--text-secondary)]">
+                          Version {liveData.meta?.versionId || "1"} • Updated{" "}
+                          {liveData.meta?.lastUpdated || "Now"} • ID {liveData.id}
+                        </div>
+                      </div>
+                      <Badge tone="ok">Verified in DB</Badge>
+                    </div>
+                  )}
                 </div>
-                <pre>{JSON.stringify(activeRecord.target_record, null, 2)}</pre>
+              ) : (
+                <div className="rounded-[var(--radius-md)] border border-[var(--info-border)] bg-[var(--info-bg)] px-4 py-3 text-xs text-[var(--info)]">
+                  <strong>Dry Run Mode:</strong> Verified against HL7 FHIR R4 constraints. Deliver this batch to generate a permanent Medplum UUID.
+                </div>
+              )}
+
+              <ReconciliationTable
+                table={reconciliationData.filter(
+                  (r) => r.status !== "dropped" && r.status !== "sanitized"
+                )}
+                sourceTitle="Input Source"
+                targetTitle="Committed in Medplum"
+              />
+            </div>
+          )}
+
+          {modalTab === "raw" && (
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="m-0 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                    1. {sourceLabel}
+                  </h4>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handleCopy("src", activeRecord.source_record)}
+                  >
+                    {activeCopiedKey === "src" ? (
+                      <Check className="h-3.5 w-3.5 text-[var(--ok)]" aria-hidden="true" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                    )}
+                    {activeCopiedKey === "src" ? "Copied" : "Copy Source"}
+                  </Button>
+                </div>
+                <pre
+                  translate="no"
+                  className="max-h-[400px] rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-code)] p-3.5 text-xs text-[var(--text-primary)]"
+                >
+                  {JSON.stringify(activeRecord.source_record || {}, null, 2)}
+                </pre>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="m-0 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                    2. Target Medplum Resource
+                  </h4>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() =>
+                      handleCopy("tgt", liveData || activeRecord.target_record)
+                    }
+                  >
+                    {activeCopiedKey === "tgt" ? (
+                      <Check className="h-3.5 w-3.5 text-[var(--ok)]" aria-hidden="true" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                    )}
+                    {activeCopiedKey === "tgt" ? "Copied" : "Copy Target"}
+                  </Button>
+                </div>
+                <pre
+                  translate="no"
+                  className="max-h-[400px] rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-code)] p-3.5 text-xs text-[var(--text-primary)]"
+                >
+                  {JSON.stringify(liveData || activeRecord.target_record || {}, null, 2)}
+                </pre>
               </div>
             </div>
           )}
         </div>
-      </div>
-    </div>
+      )}
+    </AppDialog>
   );
 }

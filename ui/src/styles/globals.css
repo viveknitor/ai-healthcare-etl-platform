@@ -1,0 +1,129 @@
+@import "tailwindcss";
+@import "./tokens.css";
+
+@layer base {
+  html {
+    scrollbar-gutter: stable;
+    scroll-padding-block-start: 72px;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--bg-canvas);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    line-height: 1.55;
+    overscroll-behavior: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4 {
+    text-wrap: balance;
+    color: var(--text-primary);
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  code, pre, .font-mono {
+    font-family: var(--font-mono);
+  }
+
+  pre {
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  select {
+    background-color: var(--bg-surface);
+    color: var(--text-primary);
+  }
+
+  /* Universal accessible keyboard focus ring */
+  :where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+}
+
+/* Utilities for typography, tabular metrics, and scroll containers */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.clinical-prose {
+  max-width: 68ch;
+  text-wrap: pretty;
+}
+
+.scroll-fade-y {
+  overscroll-behavior: contain;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    black 12px,
+    black calc(100% - 12px),
+    transparent
+  );
+}
+
+/* Native HTML5 / Base UI Dialog Backdrop & Locking */
+.etl-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  background: var(--backdrop-scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  overscroll-behavior: contain;
+}
+
+.etl-dialog-popup {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  width: 100%;
+  max-height: min(88dvh, 860px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: transform 180ms var(--ease-out-ui), opacity 180ms var(--ease-out-ui);
+}
+
+@media (max-width: 600px) {
+  .etl-dialog-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .etl-dialog-popup[data-sheet-mobile="true"] {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    max-height: 92dvh;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+@media (forced-colors: active) {
+  [aria-current="page"],
+  [aria-selected="true"],
+  .etl-active-ring {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

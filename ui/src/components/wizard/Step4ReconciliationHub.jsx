@@ -1,7 +1,28 @@
 import React from "react";
-import { formatHumanTableRowError } from "../modals/EditRecordModal.jsx";
-
-const STATUS_CLASS = { delivered: "ok", dry_run: "info", invalid: "bad", failed: "bad" };
+import {
+  Send,
+  Plus,
+  Download,
+  AlertTriangle,
+  CheckCircle2,
+  Braces,
+  Search,
+  Pencil,
+  Trash2,
+  ExternalLink,
+  XCircle,
+  Sparkles,
+} from "lucide-react";
+import { TableVirtuoso } from "react-virtuoso";
+import {
+  formatHumanTableRowError,
+  groupFixableQuarantineIssues,
+} from "@/utils/errorDiagnostics.js";
+import DataTableShell from "@/components/ui/DataTableShell.jsx";
+import Button from "@/components/ui/Button.jsx";
+import Badge from "@/components/ui/Badge.jsx";
+import EmptyState from "@/components/ui/EmptyState.jsx";
+import { cn } from "@/utils/cn.js";
 
 export default function Step4ReconciliationHub({
   fileData,
@@ -24,408 +45,416 @@ export default function Step4ReconciliationHub({
   filteredResults,
   totalPages,
   onRunIngestion,
+  onCancelIngestion,
   onDownloadReport,
   onDownloadJSON,
   onStartAddRecord,
   onStartEdit,
   onDeleteRecord,
   onInspectRecord,
+  onBulkFix,
 }) {
   const validCount = (scenarioCounts.validated || 0) + (scenarioCounts.delivered || 0);
   const invalidCount = scenarioCounts.invalid || 0;
   const canDeliver = validCount > 0;
+  const totalQuarantined = (scenarioCounts.invalid || 0) + (scenarioCounts.failed || 0);
+  const fixableGroups = groupFixableQuarantineIssues(
+    report?.results || [],
+    fileData?.all_rows || []
+  );
+
+  const filterOptions = [
+    { id: "ALL", label: "All", count: scenarioCounts.ALL },
+    ...(scenarioCounts.delivered > 0
+      ? [{ id: "delivered", label: "Delivered", count: scenarioCounts.delivered }]
+      : []),
+    ...(scenarioCounts.created > 0
+      ? [{ id: "created", label: "Created", count: scenarioCounts.created }]
+      : []),
+    ...(scenarioCounts.updated > 0
+      ? [{ id: "updated", label: "Updated", count: scenarioCounts.updated }]
+      : []),
+    ...(scenarioCounts.validated > 0
+      ? [{ id: "validated", label: "Validated", count: scenarioCounts.validated }]
+      : []),
+    ...(scenarioCounts.invalid > 0
+      ? [{ id: "invalid", label: "Quarantined", count: scenarioCounts.invalid }]
+      : []),
+    ...(scenarioCounts.failed > 0
+      ? [{ id: "failed", label: "Failed", count: scenarioCounts.failed }]
+      : []),
+  ];
+
+  const renderRowCells = (r, globalIdx) => {
+    const s = r.patient_summary || {};
+    const m = r.mapping_details || {};
+    const deliveryAction = m.delivery_action;
+    const isInvalid = r.status === "invalid" || (r.errors && r.errors.length > 0);
+
+    return (
+      <>
+        <td className="px-3 py-2.5 tabular-nums font-semibold text-[var(--text-muted)]">
+          {globalIdx + 1}
+        </td>
+        <td className="px-3 py-2.5">
+          <div className="font-mono font-semibold text-[var(--text-primary)]">{r.source_id}</div>
+          <div className="text-xs text-[var(--text-muted)]">Tag: {datasetName}</div>
+        </td>
+        <td className="px-3 py-2.5">
+          <div className={cn("font-semibold", isInvalid ? "text-[var(--bad)]" : "text-[var(--text-primary)]")}>
+            {s.title || "Record"}
+          </div>
+          <div className="text-xs text-[var(--text-muted)]">
+            {s.subtitle || s.primary_value || "—"}
+          </div>
+        </td>
+        <td className="px-3 py-2.5">
+          {r.target_id ? (
+            <div>
+              <a
+                href={`http://localhost:3000/${targetResource}/${r.target_id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 font-mono text-xs font-semibold text-[var(--brand)] hover:underline"
+              >
+                <span>{r.target_id.slice(0, 14)}…</span>
+                <ExternalLink className="h-3 w-3" aria-hidden="true" />
+              </a>
+              <div className="text-xs font-medium text-[var(--ok)]">
+                {deliveryAction === "created" ? "Created in Medplum" : "Updated in Medplum"}
+              </div>
+            </div>
+          ) : r.status === "dry_run" ? (
+            <span className="text-xs text-[var(--ok)] font-medium">Validated (Ready)</span>
+          ) : (
+            <span className="text-xs text-[var(--text-muted)]">—</span>
+          )}
+        </td>
+        <td className="px-3 py-2.5">
+          {r.status === "delivered" ? (
+            <Badge tone="ok">{deliveryAction === "created" ? "Created" : "Updated"}</Badge>
+          ) : r.status === "dry_run" ? (
+            <Badge tone="brand">Validated</Badge>
+          ) : isInvalid ? (
+            <Badge tone="bad">Quarantined</Badge>
+          ) : (
+            <Badge tone="bad">{r.status}</Badge>
+          )}
+          {r.errors && r.errors.length > 0 && (
+            <div className="mt-1 text-xs text-[var(--bad)] leading-snug">
+              {formatHumanTableRowError(r.errors[0], r.source_id)}
+            </div>
+          )}
+        </td>
+        <td className="px-3 py-2.5 text-right">
+          <div className="inline-flex items-center gap-1">
+            <Button
+              size="sm"
+              variant="secondary"
+              aria-label={`Inspect record ${r.source_id}`}
+              onClick={() => onInspectRecord(r)}
+            >
+              <Search className="h-3.5 w-3.5" aria-hidden="true" />
+              Inspect
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              aria-label={`Edit record ${r.source_id}`}
+              onClick={() => onStartEdit(globalIdx, r)}
+            >
+              <Pencil className="h-3.5 w-3.5 text-[var(--brand)]" aria-hidden="true" />
+              Edit
+            </Button>
+            <Button
+              size="icon"
+              variant="danger"
+              aria-label={`Exclude record ${r.source_id}`}
+              title={`Exclude ${r.source_id}`}
+              onClick={() => onDeleteRecord(globalIdx)}
+            >
+              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+            </Button>
+          </div>
+        </td>
+      </>
+    );
+  };
 
   return (
-    <div className="wizard-step-pane">
-      {/* 1. Ingestion Control Bar */}
-      <div className="section-header-row" style={{ alignItems: "center" }}>
+    <div className="space-y-4">
+      {/* Header & Delivery Trigger */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="section-title">Step 4: Live Delivery, Reconciliation &amp; Audit</h3>
-          <p className="sub-meta">
-            Stream validated records to Medplum with dynamic reconciliation and partial quarantine safety
-          </p>
+          <h2 className="m-0 text-lg font-bold tracking-tight text-[var(--text-primary)]">
+            Phase 4: Deliver &amp; Audit
+          </h2>
         </div>
 
-        <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-          <button
-            className="primary"
+        <div className="flex flex-wrap items-center gap-2">
+          {busy === "ingest" && onCancelIngestion && (
+            <Button size="sm" variant="danger" onClick={onCancelIngestion}>
+              <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
+              Cancel
+            </Button>
+          )}
+          <Button
+            variant="success"
+            loading={busy === "ingest"}
+            disabled={!canDeliver || (Boolean(busy) && busy !== "ingest")}
             onClick={() => onRunIngestion(false)}
-            disabled={!canDeliver || !!busy}
-            style={{
-              padding: "9px 18px",
-              fontWeight: 700,
-              fontSize: "13px",
-              background: canDeliver ? "linear-gradient(135deg, #10b981 0%, #059669 100%)" : undefined,
-              borderColor: canDeliver ? "rgba(16, 185, 129, 0.4)" : undefined,
-              boxShadow: canDeliver ? "0 4px 14px rgba(16, 185, 129, 0.35)" : undefined,
-            }}
           >
+            {busy !== "ingest" && <Send className="h-4 w-4" aria-hidden="true" />}
             {busy === "ingest"
-              ? "⚡ Ingesting to Medplum in Progress…"
+              ? "Delivering…"
               : invalidCount > 0
-              ? `⚡ Deliver ${validCount} Validated (Quarantine ${invalidCount})`
-              : `⚡ Deliver All ${validCount || fileData?.total_rows || 0} to Medplum`}
-          </button>
+              ? `Deliver ${validCount} Valid`
+              : `Deliver (${validCount || fileData?.total_rows || 0})`}
+          </Button>
         </div>
       </div>
 
-      {/* 2. High-Speed Live Ingestion Streaming Progress Bar */}
+      {/* Live SSE Streaming Progress */}
       {streamProgress && (
         <div
-          className="card"
-          style={{
-            margin: "0 0 16px",
-            padding: "14px 18px",
-            background: "linear-gradient(135deg, rgba(15, 23, 42, 0.8) 0%, rgba(30, 41, 59, 0.8) 100%)",
-            border: "1px solid rgba(56, 189, 248, 0.3)",
-          }}
+          aria-live="polite"
+          className="rounded-[var(--radius-lg)] border border-[var(--brand-border)] bg-[var(--bg-surface)] p-4 shadow-[var(--shadow-sm)] space-y-2"
         >
-          <div className="row between" style={{ margin: "0 0 6px", fontSize: "12px", alignItems: "center" }}>
-            <span style={{ fontWeight: 600 }}>
-              {streamProgress.isComplete ? "✓ Ingestion Processing Complete" : "🚀 Delivering Records via High-Speed Pipeline…"}
-              <span className="chip brand sm" style={{ marginLeft: "8px" }}>
-                {streamProgress.current} / {streamProgress.total} Records ({streamProgress.percent}%)
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs tabular-nums">
+            <div className="flex items-center gap-2 font-semibold text-[var(--text-primary)]">
+              <span>
+                {streamProgress.cancelled
+                  ? "Streaming Cancelled"
+                  : streamProgress.isComplete
+                  ? "Ingestion Processing Complete"
+                  : "Streaming Records to Medplum…"}
               </span>
-            </span>
-            <span style={{ color: "var(--brand)", fontWeight: 700 }}>
-              ⚡ {streamProgress.recordsPerSec} rec/sec
+              <Badge tone={streamProgress.isComplete ? "ok" : "brand"}>
+                {streamProgress.current} / {streamProgress.total} ({streamProgress.percent}%)
+              </Badge>
+            </div>
+            <span className="font-bold text-[var(--brand)]">
+              {streamProgress.recordsPerSec} rec/sec
             </span>
           </div>
-          <div
-            style={{
-              width: "100%",
-              height: "8px",
-              background: "rgba(0,0,0,0.4)",
-              borderRadius: "4px",
-              overflow: "hidden",
-            }}
-          >
+
+          <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--bg-muted)]">
             <div
-              style={{
-                width: `${streamProgress.percent}%`,
-                height: "100%",
-                background: "linear-gradient(90deg, #38bdf8 0%, #34d399 100%)",
-                transition: "width 0.15s ease",
-                boxShadow: "0 0 10px rgba(56, 189, 248, 0.5)",
-              }}
+              className={cn(
+                "h-full transition-[width] duration-150",
+                streamProgress.isComplete ? "bg-[var(--ok)]" : "bg-[var(--brand)]"
+              )}
+              style={{ width: `${streamProgress.percent}%` }}
             />
           </div>
         </div>
       )}
 
-      {/* 3. Ingestion Results, Scenario KPI Badges & Multi-Download Toolbar */}
+      {/* Results & Export Hub */}
       {report && (
-        <>
-          <div id="ingestion-results-section" style={{ marginTop: 0, marginBottom: "16px" }}>
-            <div className="row between" style={{ alignItems: "flex-start", marginBottom: "12px" }}>
-              <div>
-                <h4 style={{ margin: 0, fontSize: "16px" }}>Batch Results: {fileData?.filename}</h4>
-                <p className="sub-meta" style={{ marginTop: "4px" }}>
-                  Streamed {report.results?.length || 0} of {report.summary?.total} records using mapping <code>{mapping?.name}</code>.
-                </p>
-              </div>
-
-              <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                <button
-                  className="primary sm"
-                  onClick={onStartAddRecord}
-                  title="Add a new record to this batch"
-                >
-                  ➕ Add Record
-                </button>
-              </div>
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-5 shadow-[var(--shadow-sm)] space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="m-0 text-base font-bold text-[var(--text-primary)]">
+                Batch Results: {fileData?.filename}
+              </h3>
+              <p className="m-0 mt-0.5 text-xs text-[var(--text-muted)] tabular-nums">
+                Processed {report.results?.length || 0} of {report.summary?.total} records using{" "}
+                <code>{mapping?.name}</code>.
+              </p>
             </div>
 
-            {/* Scenario Metrics & Download Hub Banner */}
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "12px",
-                padding: "12px 16px",
-                background: "rgba(15, 23, 42, 0.65)",
-                border: "1px solid var(--card-border)",
-                borderRadius: "var(--radius-md)",
-                marginBottom: "12px",
-              }}
-            >
-              {/* Scenario KPI Badges */}
-              <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                <span className="chip" style={{ fontWeight: 600 }}>Total: {report.summary?.total || 0}</span>
-                {scenarioCounts.delivered > 0 && (
-                  <span className="chip ok" title={`${scenarioCounts.created} Created, ${scenarioCounts.updated} Updated`}>
-                    ✓ Delivered: {scenarioCounts.delivered}
-                    {scenarioCounts.created > 0 && <span style={{ opacity: 0.85, fontSize: "11px", marginLeft: "4px" }}>({scenarioCounts.created} created)</span>}
-                    {scenarioCounts.updated > 0 && <span style={{ opacity: 0.85, fontSize: "11px", marginLeft: "4px" }}>({scenarioCounts.updated} updated)</span>}
-                  </span>
-                )}
-                {scenarioCounts.validated > 0 && (
-                  <span className="chip brand">🛡️ Validated: {scenarioCounts.validated}</span>
-                )}
-                {scenarioCounts.invalid > 0 && (
-                  <span className="chip bad" style={{ background: "rgba(239, 68, 68, 0.2)", border: "1px solid #ef4444" }}>
-                    ⚠️ Quarantined Invalid: {scenarioCounts.invalid}
-                  </span>
-                )}
-                {scenarioCounts.failed > 0 && (
-                  <span className="chip bad">❌ Failed: {scenarioCounts.failed}</span>
-                )}
-              </div>
+            <Button size="sm" variant="primary" onClick={onStartAddRecord}>
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              Add Record
+            </Button>
+          </div>
 
-              {/* Dedicated Scenario Download Action Buttons (Excel UTF-8 BOM) */}
-              <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-                <button
-                  className="secondary sm"
-                  onClick={() => onDownloadReport("full")}
-                  title="Download complete audit report including all 27+ original source columns and Medplum URLs"
-                  style={{ fontWeight: 600 }}
-                >
-                  📥 Full Audit CSV ({report.results?.length || 0})
-                </button>
-                <button
-                  className="secondary sm"
-                  onClick={() => onDownloadReport("quarantine")}
-                  disabled={scenarioCounts.invalid === 0 && scenarioCounts.failed === 0}
-                  title="Export only quarantined/invalid rows with field failure diagnostics for clinical remediation"
-                  style={{
-                    color: (scenarioCounts.invalid > 0 || scenarioCounts.failed > 0) ? "#ef4444" : "var(--muted)",
-                    borderColor: (scenarioCounts.invalid > 0 || scenarioCounts.failed > 0) ? "rgba(239, 68, 68, 0.4)" : "var(--card-border)",
-                    fontWeight: 600,
-                  }}
-                >
-                  🚨 Quarantine Exceptions ({scenarioCounts.invalid + scenarioCounts.failed})
-                </button>
-                <button
-                  className="secondary sm"
-                  onClick={() => onDownloadReport("manifest")}
-                  disabled={scenarioCounts.delivered === 0}
-                  title="Export delivery manifest of successfully persisted Medplum resources"
-                  style={{
-                    color: scenarioCounts.delivered > 0 ? "var(--ok)" : "var(--muted)",
-                    borderColor: scenarioCounts.delivered > 0 ? "rgba(16, 185, 129, 0.4)" : "var(--card-border)",
-                    fontWeight: 600,
-                  }}
-                >
-                  ✓ Delivery Manifest ({scenarioCounts.delivered})
-                </button>
-                <button
-                  className="secondary sm"
-                  onClick={onDownloadJSON}
-                  title="Download complete JSON audit package"
-                >
-                  💾 JSON Bundle
-                </button>
-              </div>
+          {/* Scenario KPI Summary & Export Toolbar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-subtle)]/70 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone="neutral">Total: {report.summary?.total || 0}</Badge>
+              {scenarioCounts.delivered > 0 && (
+                <Badge tone="ok" icon={CheckCircle2}>
+                  Delivered: {scenarioCounts.delivered} ({scenarioCounts.created} created,{" "}
+                  {scenarioCounts.updated} updated)
+                </Badge>
+              )}
+              {scenarioCounts.validated > 0 && (
+                <Badge tone="brand">Validated: {scenarioCounts.validated}</Badge>
+              )}
+              {scenarioCounts.invalid > 0 && (
+                <Badge tone="bad" icon={AlertTriangle}>
+                  Quarantined: {scenarioCounts.invalid}
+                </Badge>
+              )}
+              {scenarioCounts.failed > 0 && (
+                <Badge tone="bad">Failed: {scenarioCounts.failed}</Badge>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="secondary" onClick={() => onDownloadReport("full")}>
+                <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                Full Audit CSV ({report.results?.length || 0})
+              </Button>
+              <Button
+                size="sm"
+                variant={totalQuarantined > 0 ? "danger" : "secondary"}
+                disabled={totalQuarantined === 0}
+                onClick={() => onDownloadReport("quarantine")}
+              >
+                <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+                Quarantine ({totalQuarantined})
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={scenarioCounts.delivered === 0}
+                onClick={() => onDownloadReport("manifest")}
+              >
+                <CheckCircle2 className="h-3.5 w-3.5 text-[var(--ok)]" aria-hidden="true" />
+                Manifest ({scenarioCounts.delivered})
+              </Button>
+              <Button size="sm" variant="secondary" onClick={onDownloadJSON}>
+                <Braces className="h-3.5 w-3.5" aria-hidden="true" />
+                JSON Bundle
+              </Button>
             </div>
           </div>
 
-          {/* High-Volume Search & Scenario Filter Bar */}
-          <div
-            className="row between"
-            style={{
-              margin: "0 0 12px",
-              padding: "8px 12px",
-              background: "rgba(0,0,0,0.25)",
-              borderRadius: "var(--radius-sm)",
-              border: "1px solid var(--card-border)",
-              alignItems: "center",
-              flexWrap: "wrap",
-              gap: "10px",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-              <input
-                type="text"
-                placeholder="🔍 Search ID or Name..."
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setCurrentPage(1);
-                }}
-                style={{ width: "190px", padding: "4px 8px", fontSize: "12px" }}
-              />
-              <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
-                {[
-                  { id: "ALL", label: `ALL (${scenarioCounts.ALL})` },
-                  ...(scenarioCounts.delivered > 0 ? [{ id: "delivered", label: `Delivered (${scenarioCounts.delivered})` }] : []),
-                  ...(scenarioCounts.created > 0 ? [{ id: "created", label: `✨ Created (${scenarioCounts.created})` }] : []),
-                  ...(scenarioCounts.updated > 0 ? [{ id: "updated", label: `🔄 Updated (${scenarioCounts.updated})` }] : []),
-                  ...(scenarioCounts.validated > 0 ? [{ id: "validated", label: `🛡️ Validated (${scenarioCounts.validated})` }] : []),
-                  ...(scenarioCounts.invalid > 0 ? [{ id: "invalid", label: `⚠️ Quarantined (${scenarioCounts.invalid})` }] : []),
-                  ...(scenarioCounts.failed > 0 ? [{ id: "failed", label: `❌ Failed (${scenarioCounts.failed})` }] : []),
-                ].map((st) => (
-                  <button
-                    key={st.id}
-                    className={`secondary sm ${statusFilter === st.id ? "active-pill" : ""}`}
-                    style={{ fontSize: "11px", padding: "3px 8px" }}
-                    onClick={() => {
-                      setStatusFilter(st.id);
-                      setCurrentPage(1);
-                    }}
+          {/* 1-Click Bulk Quarantine Quick-Fix Bar (Zero-PHI Local) */}
+          {fixableGroups.length > 0 && onBulkFix && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-md)] border border-[var(--warn-border)] bg-[var(--warn-bg)]/60 px-4 py-2.5">
+              <div className="flex items-center gap-2 text-xs font-semibold text-[var(--text-primary)]">
+                <Sparkles className="h-4 w-4 shrink-0 text-[var(--warn)]" aria-hidden="true" />
+                <span>Recurring format issues detected (fixed locally, zero PHI sent to AI):</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {fixableGroups.map((g) => (
+                  <Button
+                    key={g.category}
+                    size="sm"
+                    variant="primary"
+                    loading={busy === "bulk_fix"}
+                    disabled={Boolean(busy)}
+                    onClick={() => onBulkFix(g)}
                   >
-                    {st.label}
-                  </button>
+                    <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                    {g.buttonLabel} ({g.count})
+                  </Button>
                 ))}
               </div>
             </div>
+          )}
 
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "12px" }}>
-              <span style={{ color: "var(--text-muted)" }}>
-                Showing {filteredResults.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}–
-                {Math.min(currentPage * pageSize, filteredResults.length)} of {filteredResults.length}
-              </span>
-              <select
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setCurrentPage(1);
+          {/* Search, Filter & Paginated/Virtualized Table */}
+          <DataTableShell
+            searchTerm={searchTerm}
+            onSearchChange={(val) => {
+              setSearchTerm(val);
+              setCurrentPage(1);
+            }}
+            searchPlaceholder="Search ID, name, or UUID…"
+            filterOptions={filterOptions}
+            activeFilter={statusFilter}
+            onFilterChange={(id) => {
+              setStatusFilter(id);
+              setCurrentPage(1);
+            }}
+            pageSize={pageSize}
+            onPageSizeChange={(sz) => {
+              setPageSize(sz);
+              setCurrentPage(1);
+            }}
+            pageSizeOptions={[15, 25, 50, 100, 500]}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalFiltered={filteredResults.length}
+            onPageChange={setCurrentPage}
+          >
+            {paginatedResults.length === 0 ? (
+              <table className="w-full border-collapse text-left text-xs">
+                <thead className="bg-[var(--bg-subtle)] text-[var(--text-muted)]">
+                  <tr className="border-b border-[var(--border-default)]">
+                    <th scope="col" className="px-3 py-2.5 font-semibold">#</th>
+                    <th scope="col" className="px-3 py-2.5 font-semibold">Source Identifier</th>
+                    <th scope="col" className="px-3 py-2.5 font-semibold">Clinical / Demographics</th>
+                    <th scope="col" className="px-3 py-2.5 font-semibold">Target Medplum Link</th>
+                    <th scope="col" className="px-3 py-2.5 font-semibold">Status</th>
+                    <th scope="col" className="px-3 py-2.5 font-semibold text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td colSpan={6} className="p-4">
+                      <EmptyState
+                        variant="filtered"
+                        title={`No records match "${searchTerm || statusFilter}"`}
+                        description="Reset your search or status filter to view staged and delivered records."
+                        actionLabel="Clear Filters"
+                        onAction={() => {
+                          setSearchTerm("");
+                          setStatusFilter("ALL");
+                        }}
+                      />
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            ) : paginatedResults.length > 60 ? (
+              <TableVirtuoso
+                style={{ height: 520 }}
+                data={paginatedResults}
+                fixedHeaderContent={() => (
+                  <tr className="border-b border-[var(--border-default)] bg-[var(--bg-subtle)] text-left text-xs text-[var(--text-muted)]">
+                    <th scope="col" className="w-[5%] px-3 py-2.5 font-semibold">#</th>
+                    <th scope="col" className="w-[18%] px-3 py-2.5 font-semibold">Source Identifier</th>
+                    <th scope="col" className="w-[24%] px-3 py-2.5 font-semibold">Clinical / Demographics</th>
+                    <th scope="col" className="w-[20%] px-3 py-2.5 font-semibold">Target Medplum Link</th>
+                    <th scope="col" className="w-[15%] px-3 py-2.5 font-semibold">Status</th>
+                    <th scope="col" className="w-[18%] px-3 py-2.5 font-semibold text-right">Actions</th>
+                  </tr>
+                )}
+                itemContent={(idx, r) => {
+                  const globalIdx = (currentPage - 1) * pageSize + idx;
+                  return renderRowCells(r, globalIdx);
                 }}
-                style={{ padding: "3px 6px", fontSize: "12px" }}
-              >
-                <option value={15}>15 / page</option>
-                <option value={25}>25 / page</option>
-                <option value={50}>50 / page</option>
-                <option value={100}>100 / page</option>
-              </select>
-              <div style={{ display: "flex", gap: "4px" }}>
-                <button
-                  className="secondary sm"
-                  disabled={currentPage <= 1}
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  style={{ padding: "3px 8px", fontSize: "11px" }}
-                >
-                  ← Prev
-                </button>
-                <span style={{ padding: "3px 6px", fontWeight: 600 }}>
-                  {currentPage} / {totalPages}
-                </span>
-                <button
-                  className="secondary sm"
-                  disabled={currentPage >= totalPages}
-                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  style={{ padding: "3px 8px", fontSize: "11px" }}
-                >
-                  Next →
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Results Table */}
-          <div style={{ overflowX: "auto", borderRadius: "var(--radius-sm)", border: "1px solid var(--card-border)" }}>
-            <table style={{ margin: 0, fontSize: "12px" }}>
-              <thead>
-                <tr>
-                  <th style={{ width: "5%" }}>#</th>
-                  <th style={{ width: "18%" }}>Source Identifier</th>
-                  <th style={{ width: "24%" }}>Clinical / Demographics</th>
-                  <th style={{ width: "20%" }}>Target Medplum Link</th>
-                  <th style={{ width: "15%" }}>Status</th>
-                  <th style={{ width: "18%", textAlign: "right" }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedResults.map((r, idx) => {
-                  const i = (currentPage - 1) * pageSize + idx;
-                  const s = r.patient_summary || {};
-                  const m = r.mapping_details || {};
-                  const deliveryAction = m.delivery_action;
-                  const isInvalid = r.status === "invalid" || (r.errors && r.errors.length > 0);
-
-                  return (
-                    <tr
-                      key={i}
-                      style={{
-                        background: isInvalid ? "rgba(239, 68, 68, 0.08)" : undefined,
-                        borderLeft: isInvalid ? "4px solid #ef4444" : undefined,
-                      }}
-                    >
-                      <td>{i + 1}</td>
-                      <td>
-                        <strong>{r.source_id}</strong>
-                        <div className="sub-meta">Tag: {datasetName}</div>
-                      </td>
-                      <td>
-                        <div style={{ color: isInvalid ? "var(--bad)" : "var(--brand)", fontWeight: 600 }}>{s.title || "Record"}</div>
-                        <div className="sub-meta">{s.subtitle || s.primary_value || "—"}</div>
-                      </td>
-                      <td>
-                        {r.target_id ? (
-                          <div>
-                            <a
-                              href={`http://localhost:3000/${targetResource}/${r.target_id}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="target-link"
-                            >
-                              {r.target_id.slice(0, 16)}… ↗
-                            </a>
-                            <div className="sub-meta" style={{ color: "var(--ok)", fontWeight: 600 }}>
-                              {deliveryAction === "created" ? "+ Created in Medplum" : "↻ Updated in Medplum"}
-                            </div>
-                          </div>
-                        ) : r.status === "dry_run" ? (
-                          <span className="sub-meta" style={{ fontStyle: "italic", color: "var(--ok)" }}>
-                            ✓ Validated (Ready to commit)
-                          </span>
-                        ) : (
-                          "—"
+              />
+            ) : (
+              <table className="w-full border-collapse text-left text-xs">
+                <thead className="sticky top-0 bg-[var(--bg-subtle)] text-[var(--text-muted)]">
+                  <tr className="border-b border-[var(--border-default)]">
+                    <th scope="col" className="w-[5%] px-3 py-2.5 font-semibold">#</th>
+                    <th scope="col" className="w-[18%] px-3 py-2.5 font-semibold">Source Identifier</th>
+                    <th scope="col" className="w-[24%] px-3 py-2.5 font-semibold">Clinical / Demographics</th>
+                    <th scope="col" className="w-[20%] px-3 py-2.5 font-semibold">Target Medplum Link</th>
+                    <th scope="col" className="w-[15%] px-3 py-2.5 font-semibold">Status</th>
+                    <th scope="col" className="w-[18%] px-3 py-2.5 font-semibold text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border-default)]">
+                  {paginatedResults.map((r, idx) => {
+                    const globalIdx = (currentPage - 1) * pageSize + idx;
+                    const isInvalid = r.status === "invalid" || (r.errors && r.errors.length > 0);
+                    return (
+                      <tr
+                        key={`${r.source_id}-${globalIdx}`}
+                        className={cn(
+                          "hover:bg-[var(--bg-subtle)]/50",
+                          isInvalid && "bg-[var(--bad-bg)]/45 border-l-4 border-l-[var(--bad)]"
                         )}
-                      </td>
-                      <td>
-                        {r.status === "delivered" ? (
-                          <span className="chip ok">
-                            {deliveryAction === "created" ? "✨ created" : "🔄 updated"}
-                          </span>
-                        ) : r.status === "dry_run" ? (
-                          <span className="chip brand">🛡️ validated</span>
-                        ) : isInvalid ? (
-                          <span className="chip bad" style={{ background: "rgba(239, 68, 68, 0.2)", border: "1px solid #ef4444" }}>
-                            ⚠️ quarantined
-                          </span>
-                        ) : (
-                          <span className={`chip ${STATUS_CLASS[r.status] || ""}`}>{r.status}</span>
-                        )}
-                        {r.errors && r.errors.length > 0 && (
-                          <div className="error" style={{ fontSize: "11px", marginTop: "4px" }}>
-                            {formatHumanTableRowError(r.errors[0])}
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", alignItems: "center" }}>
-                          <button className="secondary sm" onClick={() => onInspectRecord(r)} title="Inspect Record">
-                            🔍
-                          </button>
-                          <button
-                            className="secondary sm"
-                            onClick={() => onStartEdit(i, r)}
-                            title="Edit Record In-Place"
-                            style={{ color: "#38bdf8", borderColor: "rgba(56, 189, 248, 0.4)" }}
-                          >
-                            ✏️ Edit
-                          </button>
-                          <button
-                            className="danger sm"
-                            onClick={() => onDeleteRecord(i)}
-                            title="Exclude from Batch"
-                            style={{ padding: "3px 7px" }}
-                          >
-                            🗑️
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </>
+                      >
+                        {renderRowCells(r, globalIdx)}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </DataTableShell>
+        </div>
       )}
     </div>
   );
 }
-

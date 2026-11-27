@@ -1,11 +1,13 @@
 import copy
 import re
+import time
 from dataclasses import asdict, dataclass, field
 
 from .connectors.hapi import HapiClient
 from .connectors.medplum import MedplumClient
 from .logging_setup import get_logger
 from .mapping.engine import MISSING, get_path
+from .telemetry import telemetry
 from .validation import validate_fhir
 
 log = get_logger("pipeline")
@@ -621,6 +623,7 @@ def ensure_parent_resource(hapi: HapiClient, medplum: MedplumClient, ref_str: st
 
 def run_hapi_to_medplum(hapi: HapiClient, medplum: MedplumClient | None, *, source_name: str = "hapi",
                         resource_type: str = "Patient", count: int = 10, offset: int = 0, dry_run: bool = False) -> RunReport:
+    t0 = time.perf_counter()
     report = RunReport()
     for src in hapi.fetch(resource_type, count=count, offset=offset):
         sid = src.get("id")
@@ -710,4 +713,17 @@ def run_hapi_to_medplum(hapi: HapiClient, medplum: MedplumClient | None, *, sour
                 source_record=src, target_record=res
             ))
             log.error("delivery failed", extra={"ctx": {"source_id": sid, "error": str(e)}})
+    summary_counts = report.summary()["counts"]
+    delivered = summary_counts.get("delivered", 0)
+    dry_run_cnt = summary_counts.get("dry_run", 0)
+    invalid_cnt = summary_counts.get("invalid", 0)
+    telemetry.record_run(
+        source=f"hapi:{resource_type}",
+        total=len(report.results),
+        valid=delivered + dry_run_cnt,
+        invalid=invalid_cnt,
+        delivered=delivered,
+        dry_run=dry_run,
+        duration_sec=time.perf_counter() - t0,
+    )
     return report

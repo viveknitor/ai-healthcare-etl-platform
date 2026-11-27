@@ -12,6 +12,7 @@ except Exception:
 import httpx
 
 from .models import MappingConfig
+from .privacy import redact_sample_for_llm
 
 SYSTEM = """You are a senior healthcare interoperability and HL7 FHIR R4 data integration architect.
 Given a sample source record (e.g. from an EHR, SQL Server table, or insurance feed) and a target FHIR R4 resource type, propose a comprehensive, high-fidelity field mapping covering as many clinical and demographic attributes as possible.
@@ -69,6 +70,7 @@ def suggest_mapping(sample: dict, target_resource: str, *, api_key: str, model: 
         if m not in models_to_try:
             models_to_try.append(m)
 
+    safe_sample = redact_sample_for_llm(sample)
     payload = {
         "system_instruction": {
             "parts": [{"text": SYSTEM}]
@@ -76,7 +78,7 @@ def suggest_mapping(sample: dict, target_resource: str, *, api_key: str, model: 
         "contents": [
             {
                 "role": "user",
-                "parts": [{"text": f"Target resource: {target_resource}\nSample record:\n{json.dumps(sample, indent=2)}"}]
+                "parts": [{"text": f"Target resource: {target_resource}\nAnonymized schema sample:\n{json.dumps(safe_sample, indent=2)}"}]
             }
         ],
         "generationConfig": {

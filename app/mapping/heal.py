@@ -9,6 +9,7 @@ import httpx
 
 from .engine import _FHIR_FIELD_CASE_MAP, MISSING, apply_mapping, get_path
 from .models import MappingConfig
+from .privacy import redact_errors_for_llm, redact_sample_for_llm
 from .suggest import SuggestError
 
 HEAL_SYSTEM = """You are an autonomous healthcare ETL agent specializing in HL7 FHIR R4 and FHIR R4B schema validation.
@@ -72,6 +73,8 @@ def heal_mapping_config(
         if m not in models_to_try:
             models_to_try.append(m)
 
+    safe_sample = redact_sample_for_llm(sample)
+    safe_errors = redact_errors_for_llm(errors)
     payload = {
         "system_instruction": {"parts": [{"text": HEAL_SYSTEM}]},
         "contents": [
@@ -81,8 +84,8 @@ def heal_mapping_config(
                     {
                         "text": (
                             f"Current Mapping Configuration:\n{json.dumps(mapping.model_dump(), indent=2)}\n\n"
-                            f"Sample Source Record:\n{json.dumps(sample, indent=2)}\n\n"
-                            f"Validation Errors Encountered:\n{json.dumps(errors, indent=2)}\n\n"
+                            f"Anonymized Sample Schema:\n{json.dumps(safe_sample, indent=2)}\n\n"
+                            f"Validation Errors Encountered:\n{json.dumps(safe_errors, indent=2)}\n\n"
                             "Please diagnose and repair the mapping rules to resolve all validation errors."
                         )
                     }

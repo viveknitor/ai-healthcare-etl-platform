@@ -1,71 +1,74 @@
-import { useState, useEffect } from "react";
-import { api } from "../api.js";
-import ReconciliationTable from "../components/ReconciliationTable.jsx";
-import AgentWorkflowVisualizer from "../components/AgentWorkflowVisualizer.jsx";
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  User,
+  FlaskConical,
+  Stethoscope,
+  Building2,
+  ShieldCheck,
+  Send,
+  ChevronLeft,
+  ChevronRight,
+  Trash2,
+  Download,
+  Braces,
+  Search,
+  ExternalLink,
+  CheckCircle2,
+  Package,
+  Zap,
+  Database,
+  AlertCircle,
+} from "lucide-react";
+import { toast } from "sonner";
+import { api } from "@/api.js";
+import { useAppStore } from "@/stores/useAppStore.js";
+import { exportPipelineBatchCsv, downloadJsonFile } from "@/utils/exportReports.js";
+import AgentWorkflowVisualizer from "@/components/AgentWorkflowVisualizer.jsx";
+import InspectRecordModal from "@/components/modals/InspectRecordModal.jsx";
+import MetricCard from "@/components/layout/MetricCard.jsx";
+import DataTableShell from "@/components/ui/DataTableShell.jsx";
+import Button from "@/components/ui/Button.jsx";
+import Badge from "@/components/ui/Badge.jsx";
+import EmptyState from "@/components/ui/EmptyState.jsx";
+import { cn } from "@/utils/cn.js";
 
-const STATUS_CLASS = { delivered: "ok", dry_run: "info", invalid: "warn", failed: "bad" };
+const STATUS_TONE = { delivered: "ok", dry_run: "brand", invalid: "warn", failed: "bad" };
 const STORAGE_KEY = "healthcare_etl_pipeline_report";
 const STORAGE_COUNT_KEY = "healthcare_etl_pipeline_count";
 const STORAGE_OFFSET_KEY = "healthcare_etl_pipeline_offset";
 const STORAGE_RESOURCE_KEY = "healthcare_etl_pipeline_resource";
 
 const RESOURCE_OPTIONS = [
-  { value: "Patient", label: "Patient", sub: "Demographics & MRN", icon: "👤" },
-  { value: "Observation", label: "Observation", sub: "Labs & Clinical Vitals", icon: "🧪" },
-  { value: "Condition", label: "Condition", sub: "Diagnoses & Problems", icon: "🩺" },
-  { value: "Encounter", label: "Encounter", sub: "Visits & Admissions", icon: "🏥" },
+  { value: "Patient", label: "Patient", sub: "Demographics", icon: User },
+  { value: "Observation", label: "Observation", sub: "Labs & Vitals", icon: FlaskConical },
+  { value: "Condition", label: "Condition", sub: "Diagnoses", icon: Stethoscope },
+  { value: "Encounter", label: "Encounter", sub: "Visits", icon: Building2 },
 ];
 
 export default function PipelinePage() {
+  const openConfirm = useAppStore((s) => s.openConfirm);
+  const setActiveBatch = useAppStore((s) => s.setActiveBatch);
+  const refreshHealthAndStats = useAppStore((s) => s.refreshHealthAndStats);
+
   const [resourceType, setResourceType] = useState(
     () => localStorage.getItem(STORAGE_RESOURCE_KEY) || "Patient"
   );
-  const [count, setCount] = useState(() => Number(localStorage.getItem(STORAGE_COUNT_KEY)) || 5);
-  const [offset, setOffset] = useState(() => Number(localStorage.getItem(STORAGE_OFFSET_KEY)) || 0);
+  const [count, setCount] = useState(
+    () => Number(localStorage.getItem(STORAGE_COUNT_KEY)) || 5
+  );
+  const [offset, setOffset] = useState(
+    () => Number(localStorage.getItem(STORAGE_OFFSET_KEY)) || 0
+  );
   const [dryRun, setDryRun] = useState(true);
   const [isValidated, setIsValidated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [activeRecord, setActiveRecord] = useState(null);
-  const [modalTab, setModalTab] = useState("recon"); // "recon" | "dest" | "raw"
-  const [liveData, setLiveData] = useState(null);
-  const [liveLoading, setLiveLoading] = useState(false);
-  const [liveError, setLiveError] = useState("");
-  const [copiedKey, setCopiedKey] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
 
-  const openInspector = (record) => {
-    setActiveRecord(record);
-    setModalTab("recon");
-    setLiveData(null);
-    setLiveError("");
-    setCopiedKey("");
-  };
-
-  const fetchLiveDestination = async () => {
-    if (!activeRecord?.target_id) return;
-    setLiveLoading(true);
-    setLiveError("");
-    try {
-      const res = await api.getLiveMedplumResource(resourceType, activeRecord.target_id);
-      setLiveData(res.resource);
-    } catch (err) {
-      setLiveError(err.message);
-    } finally {
-      setLiveLoading(false);
-    }
-  };
-
-  const copyPayload = (key, data) => {
-    navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-    setCopiedKey(key);
-    setTimeout(() => setCopiedKey(""), 2000);
-  };
-
-  // Persistent report state: survives page reloads until explicitly cleared
   const [report, setReport] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -84,37 +87,70 @@ export default function PipelinePage() {
   }, [report]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_COUNT_KEY, count);
+    localStorage.setItem(STORAGE_COUNT_KEY, String(count));
   }, [count]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_OFFSET_KEY, offset);
+    localStorage.setItem(STORAGE_OFFSET_KEY, String(offset));
   }, [offset]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_RESOURCE_KEY, resourceType);
   }, [resourceType]);
 
-  async function executePipeline(isDryRun = dryRun, customOffset = offset, customResType = resourceType) {
-    if (
-      !isDryRun &&
-      !window.confirm(
-        `This will deliver ${count} ${customResType} records (Offset ${customOffset}) to local Medplum (http://localhost:8103). Continue?`
-      )
-    ) {
-      return;
+  useEffect(() => {
+    setActiveBatch({
+      datasetName: `HAPI ${resourceType}`,
+      rowCount: report?.summary?.total ?? count,
+      targetResource: resourceType,
+    });
+  }, [resourceType, report?.summary?.total, count, setActiveBatch]);
+
+  async function executePipeline(
+    isDryRun = dryRun,
+    customOffset = offset,
+    customResType = resourceType
+  ) {
+    if (!isDryRun) {
+      const confirmed = await openConfirm({
+        title: `Deliver ${count} ${customResType} records to Medplum?`,
+        description: `Records from source offset ${customOffset} will be conditionally upserted into local Medplum (http://localhost:8103).`,
+        confirmLabel: `Deliver ${count} ${customResType} Records`,
+        tone: "success",
+      });
+      if (!confirmed) return;
     }
+
     setLoading(true);
     setError("");
     try {
-      const data = await api.runPipeline(Number(count), isDryRun, Number(customOffset), customResType);
+      const data = await api.runPipeline(
+        Number(count),
+        isDryRun,
+        Number(customOffset),
+        customResType
+      );
       setReport(data);
       if (isDryRun) {
-        const hasErr = (data?.summary?.counts?.invalid || 0) > 0 || (data?.summary?.counts?.failed || 0) > 0;
-        setIsValidated(!hasErr && (data?.results?.length || 0) > 0);
+        const hasErr =
+          (data?.summary?.counts?.invalid || 0) > 0 ||
+          (data?.summary?.counts?.failed || 0) > 0;
+        const ok = !hasErr && (data?.results?.length || 0) > 0;
+        setIsValidated(ok);
+        if (ok) {
+          toast.success(`Validated ${data.results.length} ${customResType} records`);
+        } else {
+          toast.warning("Validation completed with quarantined records");
+        }
+      } else {
+        toast.success(
+          `Delivered ${data?.summary?.counts?.delivered || 0} ${customResType} records to Medplum`
+        );
       }
+      refreshHealthAndStats();
     } catch (e) {
       setError(e.message);
+      toast.error(e.message);
       if (isDryRun) setIsValidated(false);
     } finally {
       setLoading(false);
@@ -125,6 +161,7 @@ export default function PipelinePage() {
     setIsValidated(false);
     const newOffset = offset + count;
     setOffset(newOffset);
+    setDryRun(true);
     executePipeline(true, newOffset, resourceType);
   }
 
@@ -132,829 +169,479 @@ export default function PipelinePage() {
     setIsValidated(false);
     const newOffset = Math.max(0, offset - count);
     setOffset(newOffset);
+    setDryRun(true);
     executePipeline(true, newOffset, resourceType);
   }
 
-  function clearResults() {
-    if (window.confirm("Are you sure you want to clear these results from the UI?")) {
-      setReport(null);
-      setIsValidated(false);
-      localStorage.removeItem(STORAGE_KEY);
-      setActiveRecord(null);
-    }
+  async function clearResults() {
+    const confirmed = await openConfirm({
+      title: "Clear cached pipeline results?",
+      description: "This clears the local UI table cache. It does not delete records in Medplum.",
+      confirmLabel: "Clear Results",
+      tone: "danger",
+    });
+    if (!confirmed) return;
+    setReport(null);
+    setIsValidated(false);
+    localStorage.removeItem(STORAGE_KEY);
+    setActiveRecord(null);
+    toast.info("Pipeline table cleared");
   }
 
-  const downloadCSVReport = () => {
-    if (!report?.results || report.results.length === 0) return;
-    const rows = report.results.map((r, i) => ({
-      "#": offset + i + 1,
-      "Source Resource": resourceType,
-      "Source ID": r.source_id,
-      "Title / Patient Name": r.patient_summary?.title || "—",
-      "Primary Metric / Code": r.patient_summary?.primary_value || r.patient_summary?.code || "—",
-      "Secondary / Date": r.patient_summary?.secondary_value || r.patient_summary?.subtitle || "—",
-      "Status": r.status === "dry_run" ? "validated" : r.status,
-      "Delivery Action": r.mapping_details?.delivery_action || "—",
-      "Target Medplum ID": r.target_id || "—",
-      "Medplum URL": r.target_id ? `http://localhost:3000/${resourceType}/${r.target_id}` : "—",
-      "Idempotent Identifier": r.mapping_details?.idempotent_identifier || `urn:source:hapi|${r.source_id}`,
-      "Subject Link": r.mapping_details?.target_subject_reference || r.patient_summary?.subject_reference || "—",
-      "Errors": (r.errors || []).join(" | "),
-    }));
-    const headers = Object.keys(rows[0]);
-    // Prepend UTF-8 BOM (\uFEFF) so Microsoft Excel opens it directly without character corruption
-    const csvContent =
-      "\uFEFF" +
-      [
-        headers.join(","),
-        ...rows.map((row) =>
-          headers
-            .map((h) => `"${String(row[h] || "").replace(/"/g, '""')}"`)
-            .join(",")
-        ),
-      ].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `HAPI_to_Medplum_${resourceType}_Offset${offset}_Audit.csv`;
-    link.click();
+  const handleDownloadCsv = () => {
+    const res = exportPipelineBatchCsv({
+      results: report?.results || [],
+      resourceType,
+      offset,
+    });
+    if (res.ok) toast.success(`Exported ${res.count} rows to ${res.filename}`);
   };
 
-  const downloadJSONReport = () => {
+  const handleDownloadJson = () => {
     if (!report) return;
-    const blob = new Blob([JSON.stringify(report, null, 2)], {
-      type: "application/json",
-    });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `HAPI_to_Medplum_${resourceType}_Offset${offset}_Bundle.json`;
-    link.click();
+    const filename = `HAPI_to_Medplum_${resourceType}_Offset${offset}_Bundle.json`;
+    downloadJsonFile(report, filename);
+    toast.success(`Downloaded ${filename}`);
   };
 
   const deliveredCount = report?.summary?.counts?.delivered || 0;
   const totalCount = report?.summary?.total || 0;
 
+  const rawResults = report?.results || [];
+  const filteredResults = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return rawResults.filter((r) => {
+      if (statusFilter !== "ALL" && r.status !== statusFilter) return false;
+      if (!term) return true;
+      const s = r.patient_summary || {};
+      const m = r.mapping_details || {};
+      return (
+        (r.source_id && String(r.source_id).toLowerCase().includes(term)) ||
+        (r.target_id && String(r.target_id).toLowerCase().includes(term)) ||
+        (s.title && String(s.title).toLowerCase().includes(term)) ||
+        (s.code && String(s.code).toLowerCase().includes(term)) ||
+        (s.primary_value && String(s.primary_value).toLowerCase().includes(term)) ||
+        (m.idempotent_identifier && String(m.idempotent_identifier).toLowerCase().includes(term))
+      );
+    });
+  }, [rawResults, statusFilter, searchTerm]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredResults.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedResults = filteredResults.slice(
+    (safePage - 1) * pageSize,
+    safePage * pageSize
+  );
+
+  const filterOptions = [
+    { id: "ALL", label: "All", count: rawResults.length },
+    ...["delivered", "dry_run", "invalid", "failed"]
+      .map((st) => ({
+        id: st,
+        label: st === "dry_run" ? "Validated" : st.charAt(0).toUpperCase() + st.slice(1),
+        count: rawResults.filter((r) => r.status === st).length,
+      }))
+      .filter((o) => o.count > 0),
+  ];
+
   return (
-    <section>
-      {/* 1. Executive KPI Metric Dashboard Bar */}
-      <div className="kpi-grid">
-        <div className="kpi-card">
-          <div className="kpi-icon">📦</div>
-          <div className="kpi-content">
-            <span className="kpi-label">Batch Processed</span>
-            <span className="kpi-value">{totalCount} Records</span>
-            <span className="kpi-sub">Source: HAPI FHIR R4</span>
-          </div>
-        </div>
-
-        <div className="kpi-card">
-          <div className="kpi-icon" style={{ color: "var(--ok)" }}>⚡</div>
-          <div className="kpi-content">
-            <span className="kpi-label">Delivered to Medplum</span>
-            <span className="kpi-value">{deliveredCount} Persisted</span>
-            <span className="kpi-sub">100% Idempotent Upsert</span>
-          </div>
-        </div>
-
-        <div className="kpi-card">
-          <div className="kpi-icon" style={{ color: "var(--brand)" }}>🏥</div>
-          <div className="kpi-content">
-            <span className="kpi-label">Target Destination</span>
-            <span className="kpi-value">Medplum :8103</span>
-            <span className="kpi-sub">PostgreSQL 16 Backend</span>
-          </div>
-        </div>
-
-        <div className="kpi-card">
-          <div className="kpi-icon" style={{ color: "var(--info)" }}>🛡️</div>
-          <div className="kpi-content">
-            <span className="kpi-label">Semantic Quality Gate</span>
-            <span className="kpi-value">FHIR R4 / R4B</span>
-            <span className="kpi-sub">Zero Duplicate Rows</span>
-          </div>
-        </div>
+    <section className="space-y-5">
+      {/* 1. KPI Summary Bar */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricCard
+          title="Batch"
+          value={`${totalCount}`}
+          subvalue="HAPI FHIR"
+          icon={Package}
+          tone="neutral"
+        />
+        <MetricCard
+          title="Delivered"
+          value={`${deliveredCount}`}
+          subvalue="Medplum"
+          icon={Zap}
+          tone="ok"
+        />
+        <MetricCard
+          title="Target"
+          value="Medplum :8103"
+          subvalue="PostgreSQL"
+          icon={Database}
+          tone="brand"
+        />
+        <MetricCard
+          title="Standard"
+          value="FHIR R4"
+          subvalue="Auto-parent"
+          icon={ShieldCheck}
+          tone="ai"
+        />
       </div>
 
-      {/* 2. Autonomous Multi-Agent Relay */}
+      {/* 2. Sync Control Card */}
+      <div className="rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-5 shadow-[var(--shadow-sm)] space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="m-0 text-base font-bold text-[var(--text-primary)]">
+            HAPI → Medplum Sync
+          </h2>
+          <div className="flex items-center gap-2">
+            {isValidated && (
+              <Badge tone="ok" icon={CheckCircle2}>
+                Validated
+              </Badge>
+            )}
+            {report && (
+              <Button size="sm" variant="danger" onClick={clearResults}>
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                Clear
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Resource Type Selector */}
+        <div
+          role="group"
+          aria-label="FHIR resource type"
+          className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
+        >
+          {RESOURCE_OPTIONS.map((opt) => {
+            const Icon = opt.icon;
+            const active = resourceType === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                aria-pressed={active}
+                onClick={() => {
+                  setResourceType(opt.value);
+                  setOffset(0);
+                  setIsValidated(false);
+                }}
+                className={cn(
+                  "flex items-center gap-3 rounded-[var(--radius-md)] border px-3.5 py-2.5 text-left transition-colors cursor-pointer",
+                  active
+                    ? "border-[var(--brand-border)] bg-[var(--brand-bg)] text-[var(--brand)] etl-active-ring"
+                    : "border-[var(--border-default)] bg-[var(--bg-subtle)]/50 text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)]"
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <div className="min-w-0">
+                  <div className="text-xs font-bold">{opt.label}</div>
+                  <div className="truncate text-xs text-[var(--text-muted)]">{opt.sub}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Batch Parameters & Execution Bar */}
+        <div className="flex flex-wrap items-end justify-between gap-4 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-subtle)]/70 p-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1">
+              <label htmlFor="sync-batch-size" className="block text-xs font-semibold text-[var(--text-secondary)]">
+                Count
+              </label>
+              <input
+                id="sync-batch-size"
+                type="text"
+                inputMode="numeric"
+                value={count}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value.replace(/\D/g, ""), 10);
+                  setCount(Number.isNaN(val) ? 1 : Math.min(100, Math.max(1, val)));
+                  setIsValidated(false);
+                }}
+                className="h-[36px] w-[96px] rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 text-xs tabular-nums"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="sync-offset" className="block text-xs font-semibold text-[var(--text-secondary)]">
+                Offset
+              </label>
+              <input
+                id="sync-offset"
+                type="text"
+                inputMode="numeric"
+                value={offset}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value.replace(/\D/g, ""), 10);
+                  setOffset(Number.isNaN(val) ? 0 : Math.max(0, val));
+                  setIsValidated(false);
+                }}
+                className="h-[36px] w-[96px] rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 text-xs tabular-nums"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              disabled={loading || offset <= 0}
+              onClick={prevBatch}
+            >
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+              Prev
+            </Button>
+
+            <Button
+              variant="secondary"
+              loading={loading && dryRun}
+              disabled={loading && !dryRun}
+              onClick={() => {
+                setDryRun(true);
+                executePipeline(true, offset, resourceType);
+              }}
+            >
+              {!(loading && dryRun) && <ShieldCheck className="h-4 w-4 text-[var(--brand)]" aria-hidden="true" />}
+              {loading && dryRun ? "Validating…" : `Validate (${count})`}
+            </Button>
+
+            <Button
+              variant="success"
+              loading={loading && !dryRun}
+              disabled={loading || !isValidated}
+              onClick={() => {
+                setDryRun(false);
+                executePipeline(false, offset, resourceType);
+              }}
+            >
+              {!(loading && !dryRun) && <Send className="h-4 w-4" aria-hidden="true" />}
+              {loading && !dryRun
+                ? "Delivering…"
+                : deliveredCount > 0
+                ? `Delivered (${deliveredCount})`
+                : `Deliver (${count})`}
+            </Button>
+
+            <Button variant="secondary" disabled={loading} onClick={nextBatch}>
+              Next
+              <ChevronRight className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </div>
+        </div>
+
+        {!isValidated && (
+          <div className="text-xs text-[var(--text-muted)]">
+            Validate before delivering.
+          </div>
+        )}
+
+        {error && (
+          <div
+            role="alert"
+            className="flex items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--bad-border)] bg-[var(--bad-bg)] px-3.5 py-2.5 text-xs font-medium text-[var(--bad)]"
+          >
+            <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>{error}</span>
+          </div>
+        )}
+      </div>
+
+      {/* 4. Pipeline Results or First-Run Empty State */}
+      {!report ? (
+        <EmptyState
+          variant="first-run"
+          title={`Ready to inspect HAPI FHIR ${resourceType} records`}
+          description={`Run Validate & Verify Schema to fetch ${count} ${resourceType} resource(s) from HAPI FHIR (offset ${offset}) in safe dry-run mode.`}
+          actionLabel={`Validate ${count} ${resourceType} Records`}
+          onAction={() => {
+            setDryRun(true);
+            executePipeline(true, offset, resourceType);
+          }}
+        />
+      ) : (
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-5 shadow-[var(--shadow-sm)] space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="m-0 text-base font-bold text-[var(--text-primary)]">
+                  Ingestion Results: {resourceType}
+                </h3>
+                <Badge tone="info">
+                  Offset {offset} • #{offset + 1}–#{offset + (report.results?.length || count)}
+                </Badge>
+                {deliveredCount > 0 && (
+                  <Badge tone="ok" icon={CheckCircle2}>
+                    Persisted to Medplum
+                  </Badge>
+                )}
+              </div>
+              <p className="m-0 mt-0.5 text-xs text-[var(--text-muted)]">
+                Cached locally across reloads. Select Inspect on any row to verify live Medplum database persistence.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="secondary" onClick={handleDownloadCsv}>
+                <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                CSV
+              </Button>
+              <Button size="sm" variant="secondary" onClick={handleDownloadJson}>
+                <Braces className="h-3.5 w-3.5" aria-hidden="true" />
+                JSON
+              </Button>
+            </div>
+          </div>
+
+          <DataTableShell
+            searchTerm={searchTerm}
+            onSearchChange={(val) => {
+              setSearchTerm(val);
+              setCurrentPage(1);
+            }}
+            searchPlaceholder={`Search ${resourceType} ID or name…`}
+            filterOptions={filterOptions}
+            activeFilter={statusFilter}
+            onFilterChange={(id) => {
+              setStatusFilter(id);
+              setCurrentPage(1);
+            }}
+            pageSize={pageSize}
+            onPageSizeChange={(sz) => {
+              setPageSize(sz);
+              setCurrentPage(1);
+            }}
+            currentPage={safePage}
+            totalPages={totalPages}
+            totalFiltered={filteredResults.length}
+            onPageChange={setCurrentPage}
+          >
+            <table className="w-full border-collapse text-left text-xs">
+              <thead className="sticky top-0 bg-[var(--bg-subtle)] text-[var(--text-muted)]">
+                <tr className="border-b border-[var(--border-default)]">
+                  <th scope="col" className="w-[5%] px-3 py-2.5 font-semibold">#</th>
+                  <th scope="col" className="w-[22%] px-3 py-2.5 font-semibold">Source {resourceType} (HAPI)</th>
+                  <th scope="col" className="w-[20%] px-3 py-2.5 font-semibold">Clinical Metric / Demographics</th>
+                  <th scope="col" className="w-[25%] px-3 py-2.5 font-semibold">Cross-Resource Links &amp; Identity</th>
+                  <th scope="col" className="w-[14%] px-3 py-2.5 font-semibold">Target Medplum</th>
+                  <th scope="col" className="w-[8%] px-3 py-2.5 font-semibold">Status</th>
+                  <th scope="col" className="w-[6%] px-3 py-2.5 font-semibold text-right">Inspect</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--border-default)]">
+                {paginatedResults.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="p-4">
+                      <EmptyState
+                        variant="filtered"
+                        title={`No records match "${searchTerm || statusFilter}"`}
+                        description="Reset your search query or status filter to view all records in this batch."
+                        actionLabel="Clear Filters"
+                        onAction={() => {
+                          setSearchTerm("");
+                          setStatusFilter("ALL");
+                        }}
+                      />
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedResults.map((r, i) => {
+                    const s = r.patient_summary || {};
+                    const m = r.mapping_details || {};
+                    const deliveryAction = m.delivery_action;
+                    const rowIdx = (safePage - 1) * pageSize + i + 1;
+
+                    return (
+                      <tr key={`${r.source_id}-${rowIdx}`} className="hover:bg-[var(--bg-subtle)]/50">
+                        <td className="px-3 py-2.5 tabular-nums font-semibold text-[var(--text-muted)]">
+                          {offset + rowIdx}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <div className="font-semibold text-[var(--text-primary)]">{s.title || "Unknown"}</div>
+                          <div className="font-mono text-xs text-[var(--text-muted)]">
+                            ID: {r.source_id}
+                            {s.code && s.code !== "—" ? ` • ${s.code}` : ""}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <div className="font-semibold text-[var(--brand)]">{s.primary_value || "—"}</div>
+                          <div className="text-xs text-[var(--text-muted)]">
+                            {s.subtitle || s.secondary_value || "—"}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 space-y-1">
+                          <code className="inline-block rounded border border-[var(--brand-border)] bg-[var(--brand-bg)] px-1.5 py-0.5 text-xs text-[var(--brand)]">
+                            {m.idempotent_identifier || `urn:source:hapi|${r.source_id}`}
+                          </code>
+                          {s.subject_reference && s.subject_reference !== "—" && (
+                            <div className="font-mono text-xs text-[var(--text-muted)]">
+                              {s.subject_reference} → {m.target_subject_reference}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          {r.target_id ? (
+                            <div>
+                              <a
+                                href={`http://localhost:3000/${resourceType}/${r.target_id}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 font-mono text-xs font-semibold text-[var(--brand)] hover:underline"
+                              >
+                                <span>{r.target_id.slice(0, 14)}…</span>
+                                <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                              </a>
+                              <div className="text-xs text-[var(--ok)] font-medium">
+                                {deliveryAction === "created" ? "Newly Created" : "Updated Existing"}
+                              </div>
+                            </div>
+                          ) : r.status === "dry_run" ? (
+                            <span className="text-xs text-[var(--text-muted)]">Validated (Pending Commit)</span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex flex-col items-start gap-1">
+                            <Badge tone={STATUS_TONE[r.status] || "neutral"}>
+                              {r.status === "dry_run" ? "validated" : r.status}
+                            </Badge>
+                            {deliveryAction && (
+                              <Badge tone={deliveryAction === "created" ? "ok" : "info"}>
+                                {deliveryAction}
+                              </Badge>
+                            )}
+                          </div>
+                          {r.errors && r.errors.length > 0 && (
+                            <div className="mt-1 text-xs text-[var(--bad)]">{r.errors.join("; ")}</div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-right">
+                          <Button size="sm" variant="secondary" onClick={() => setActiveRecord(r)}>
+                            <Search className="h-3.5 w-3.5" aria-hidden="true" />
+                            Inspect
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </DataTableShell>
+        </div>
+      )}
+
       <AgentWorkflowVisualizer
+        defaultCollapsed={true}
         datasetName={`HAPI FHIR R4 (${resourceType})`}
         recordsCount={count}
         approved={true}
         validated={isValidated}
         delivered={deliveredCount > 0}
-        onApprove={() => {}} // HAPI pipeline has no mapping approval step
+        onApprove={() => {}}
       />
 
-      {/* 3. Pipeline Control & Multi-Resource Selector */}
-      <div className="card">
-        <div className="row between" style={{ marginTop: 0, marginBottom: "16px" }}>
-          <div>
-            <h2>🔄 HAPI to Medplum Integration Engine</h2>
-            <p className="sub-meta" style={{ margin: "2px 0 0" }}>
-              Automated schema extraction, foreign-key reference remapping, and conditional upsert reconciliation with mandatory quality gates.
-            </p>
-          </div>
-          <div className="row" style={{ margin: 0, gap: "8px", alignItems: "center" }}>
-            {isValidated && (
-              <span className="chip ok" style={{ fontSize: "12px", padding: "4px 10px" }}>
-                ✓ Schema Validated
-              </span>
-            )}
-            {report && (
-              <button className="danger sm" onClick={clearResults}>
-                🗑️ Clear UI Results
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Segmented Resource Pills Selector */}
-        <div className="resource-pill-selector">
-          {RESOURCE_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              className={`resource-pill-btn ${resourceType === opt.value ? "active" : ""}`}
-              onClick={() => {
-                setResourceType(opt.value);
-                setOffset(0);
-                setIsValidated(false);
-              }}
-            >
-              <span>{opt.icon}</span>
-              <span>{opt.label}</span>
-              <span style={{ fontSize: "11px", opacity: 0.7, fontWeight: 400 }}>({opt.sub})</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Glossy Execution Control Bar */}
-        <div className="row between" style={{ alignItems: "center", background: "rgba(0,0,0,0.2)", padding: "14px 18px", borderRadius: "var(--radius-md)", border: "1px solid var(--card-border)" }}>
-          <div className="row" style={{ margin: 0, gap: "14px", alignItems: "center" }}>
-            <label>
-              Batch Size
-              <input
-                type="number"
-                min="1"
-                max="100"
-                value={count}
-                onChange={(e) => {
-                  setCount(Math.max(1, Number(e.target.value)));
-                  setIsValidated(false);
-                }}
-                style={{ width: "80px" }}
-              />
-            </label>
-
-            <label>
-              Source Offset
-              <input
-                type="number"
-                min="0"
-                value={offset}
-                onChange={(e) => {
-                  setOffset(Math.max(0, Number(e.target.value)));
-                  setIsValidated(false);
-                }}
-                style={{ width: "90px" }}
-                title="Paginates HAPI to fetch the next consecutive unique records"
-              />
-            </label>
-          </div>
-
-          <div className="row" style={{ margin: 0, gap: "10px", alignItems: "center" }}>
-            <button
-              className="secondary"
-              onClick={prevBatch}
-              disabled={loading || offset <= 0}
-              title="Fetch previous batch from source"
-            >
-              ← Prev
-            </button>
-
-            <button
-              className="secondary"
-              onClick={() => {
-                setDryRun(true);
-                executePipeline(true, offset, resourceType);
-              }}
-              disabled={loading}
-              title="Mandatory step: Validate batch against FHIR schema without writing to DB"
-              style={{ minWidth: "190px", borderColor: isValidated ? "var(--ok)" : undefined }}
-            >
-              {loading && dryRun ? "Validating…" : `🛡️ Validate & Verify Schema (${count})`}
-            </button>
-
-            <button
-              className={`primary success ${deliveredCount > 0 ? "delivered-btn" : !isValidated ? "disabled-gate" : ""}`}
-              onClick={() => {
-                if (!isValidated) {
-                  alert("Mandatory Quality Gate: You must run 'Validate & Verify Schema' before delivering records to Medplum.");
-                  return;
-                }
-                setDryRun(false);
-                executePipeline(false, offset, resourceType);
-              }}
-              disabled={loading || !isValidated}
-              title={
-                deliveredCount > 0
-                  ? `All ${deliveredCount} records successfully delivered to Medplum. Click to re-run delivery if needed.`
-                  : isValidated
-                  ? "Deliver and persist verified batch into Medplum database"
-                  : "Validation Required: Please run 'Validate & Verify Schema' first to unlock delivery."
-              }
-              style={{
-                minWidth: "210px",
-                opacity: !isValidated ? 0.45 : 1,
-                cursor: !isValidated ? "not-allowed" : "pointer",
-                background: deliveredCount > 0 ? "linear-gradient(135deg, #059669 0%, #10b981 100%)" : undefined,
-                boxShadow: deliveredCount > 0 ? "0 0 16px rgba(16, 185, 129, 0.45)" : undefined,
-                borderColor: deliveredCount > 0 ? "rgba(52, 211, 153, 0.6)" : undefined,
-              }}
-            >
-              {loading && !dryRun
-                ? "Delivering…"
-                : deliveredCount > 0
-                ? `✓ Delivered All ${deliveredCount} to Medplum`
-                : `⚡ Deliver to Medplum (${count})`}
-            </button>
-
-            <button
-              className="secondary"
-              onClick={nextBatch}
-              disabled={loading}
-              title="Advance offset to next batch of unique records"
-            >
-              Next Batch →
-            </button>
-          </div>
-        </div>
-
-        {error && <div className="error" style={{ marginTop: "14px" }}>{error}</div>}
-      </div>
-
-      {/* 3. Ingestion & Dynamic Reconciliation Table */}
-      {report && (
-        <div className="card">
-          <div className="row between" style={{ marginTop: 0, marginBottom: "12px", alignItems: "flex-start" }}>
-            <div>
-              <h2 style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", margin: 0 }}>
-                <span>Ingestion Results: {resourceType}</span>
-                <span className="chip info" style={{ fontSize: "12px" }}>
-                  Offset {offset} • Records #{offset + 1} to #{offset + (report.results?.length || count)}
-                </span>
-                {report.summary?.counts?.delivered > 0 && (
-                  <span className="chip ok" style={{ fontSize: "12px" }}>
-                    ✓ Persisted to Medplum
-                  </span>
-                )}
-              </h2>
-              <p className="sub-meta" style={{ margin: "4px 0 0" }}>
-                State is persisted across browser refreshes. Click <strong>Inspect</strong> to view field extraction &amp; destination perspective.
-              </p>
-            </div>
-
-            <div className="row" style={{ margin: 0, gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-              <button
-                className="secondary sm"
-                onClick={downloadCSVReport}
-                title="Download CSV audit report (Excel-compatible with UTF-8 BOM)"
-                style={{ padding: "6px 12px", fontSize: "12px" }}
-              >
-                📥 Export Audit CSV (Excel)
-              </button>
-              <button
-                className="secondary sm"
-                onClick={downloadJSONReport}
-                title="Download full JSON bundle"
-                style={{ padding: "6px 12px", fontSize: "12px" }}
-              >
-                📥 Export JSON Bundle
-              </button>
-              <div className="chips" style={{ margin: 0 }}>
-                <span className="chip">Total: {report.summary.total}</span>
-                {Object.entries(report.summary.counts).map(([k, v]) => (
-                  <span key={k} className={`chip ${STATUS_CLASS[k] || ""}`}>
-                    {k}: {v}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* High-Volume Search & Pagination Filter Bar */}
-          {(() => {
-            const rawResults = report?.results || [];
-            const filteredResults = rawResults.filter((r) => {
-              if (statusFilter !== "ALL" && r.status !== statusFilter) return false;
-              if (!searchTerm.trim()) return true;
-              const term = searchTerm.toLowerCase();
-              const s = r.patient_summary || {};
-              const m = r.mapping_details || {};
-              return (
-                (r.source_id && String(r.source_id).toLowerCase().includes(term)) ||
-                (r.target_id && String(r.target_id).toLowerCase().includes(term)) ||
-                (s.title && String(s.title).toLowerCase().includes(term)) ||
-                (s.code && String(s.code).toLowerCase().includes(term)) ||
-                (s.primary_value && String(s.primary_value).toLowerCase().includes(term)) ||
-                (m.idempotent_identifier && String(m.idempotent_identifier).toLowerCase().includes(term))
-              );
-            });
-
-            const totalPages = Math.ceil(filteredResults.length / pageSize) || 1;
-            const safePage = Math.min(currentPage, totalPages);
-            const paginatedResults = filteredResults.slice((safePage - 1) * pageSize, safePage * pageSize);
-
-            return (
-              <>
-                <div
-                  className="row between"
-                  style={{
-                    margin: "0 0 12px",
-                    padding: "8px 12px",
-                    background: "rgba(0,0,0,0.25)",
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--card-border)",
-                    alignItems: "center",
-                    flexWrap: "wrap",
-                    gap: "10px",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                    <input
-                      type="text"
-                      placeholder={`🔍 Search ${resourceType} ID or name...`}
-                      value={searchTerm}
-                      onChange={(e) => {
-                        setSearchTerm(e.target.value);
-                        setCurrentPage(1);
-                      }}
-                      style={{ width: "210px", padding: "4px 8px", fontSize: "12px" }}
-                    />
-                    <div style={{ display: "flex", gap: "4px" }}>
-                      {["ALL", "delivered", "dry_run", "invalid", "failed"].map((st) => {
-                        const cnt = st === "ALL"
-                          ? rawResults.length
-                          : rawResults.filter((r) => r.status === st).length;
-                        if (cnt === 0 && st !== "ALL") return null;
-                        const active = statusFilter === st;
-                        return (
-                          <button
-                            key={st}
-                            onClick={() => {
-                              setStatusFilter(st);
-                              setCurrentPage(1);
-                            }}
-                            style={{
-                              fontSize: "11px",
-                              padding: "3px 8px",
-                              borderRadius: "12px",
-                              border: active ? "1px solid var(--brand)" : "1px solid var(--card-border)",
-                              background: active ? "var(--brand)" : "rgba(255,255,255,0.05)",
-                              color: active ? "#fff" : "var(--text-muted)",
-                              cursor: "pointer",
-                            }}
-                          >
-                            {st === "dry_run" ? "validated" : st} ({cnt})
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "var(--text-muted)" }}>
-                    <span>Rows per page:</span>
-                    <select
-                      value={pageSize}
-                      onChange={(e) => {
-                        setPageSize(Number(e.target.value));
-                        setCurrentPage(1);
-                      }}
-                      style={{ padding: "3px 6px", fontSize: "11px" }}
-                    >
-                      <option value={10}>10</option>
-                      <option value={15}>15</option>
-                      <option value={25}>25</option>
-                      <option value={50}>50</option>
-                      <option value={100}>100</option>
-                    </select>
-
-                    <div style={{ display: "flex", gap: "4px", marginLeft: "8px" }}>
-                      <button
-                        className="secondary sm"
-                        disabled={safePage <= 1}
-                        onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                        style={{ padding: "2px 8px", fontSize: "11px" }}
-                      >
-                        ◀
-                      </button>
-                      <span style={{ padding: "2px 6px", alignSelf: "center" }}>
-                        {safePage} / {totalPages}
-                      </span>
-                      <button
-                        className="secondary sm"
-                        disabled={safePage >= totalPages}
-                        onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                        style={{ padding: "2px 8px", fontSize: "11px" }}
-                      >
-                        ▶
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <table>
-                  <thead>
-                    <tr>
-                      <th style={{ width: "5%" }}>#</th>
-                      <th style={{ width: "24%" }}>Source {resourceType} (HAPI)</th>
-                      <th style={{ width: "20%" }}>Clinical Metric / Demographics</th>
-                      <th style={{ width: "25%" }}>Cross-Resource Links &amp; Identity</th>
-                      <th style={{ width: "16%" }}>Target Medplum Record</th>
-                      <th style={{ width: "10%" }}>Status</th>
-                      <th style={{ width: "8%", textAlign: "right" }}>Inspect</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginatedResults.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>
-                          No records match search filter: &ldquo;{searchTerm}&rdquo;
-                        </td>
-                      </tr>
-                    ) : (
-                      paginatedResults.map((r, i) => {
-                        const s = r.patient_summary || {};
-                        const m = r.mapping_details || {};
-                        const deliveryAction = m.delivery_action;
-                        const rowIdx = (safePage - 1) * pageSize + i + 1;
-
-                        return (
-                          <tr key={i}>
-                            <td style={{ color: "var(--text-muted)", fontWeight: 600 }}>{offset + rowIdx}</td>
-                            <td>
-                              <strong style={{ fontSize: "14px", color: "#fff" }}>{s.title || "Unknown"}</strong>
-                              <div className="sub-meta">
-                                Source ID: <code>{r.source_id}</code>
-                                {s.code && s.code !== "—" && ` • Code: ${s.code}`}
-                              </div>
-                            </td>
-                            <td>
-                              <div style={{ color: "var(--brand)", fontWeight: 600 }}>{s.primary_value || "—"}</div>
-                              <div className="sub-meta">
-                                {s.subtitle ? s.subtitle : `Secondary: ${s.secondary_value || "—"}`}
-                              </div>
-                            </td>
-                            <td>
-                              <div>
-                                <span className="rule-tag">ID: {m.idempotent_identifier || `urn:source:hapi|${r.source_id}`}</span>
-                              </div>
-                              {s.subject_reference && s.subject_reference !== "—" && (
-                                <div className="sub-meta" style={{ marginTop: "3px" }}>
-                                  <span style={{ color: "var(--text-muted)" }}>Links to: </span>
-                                  <span style={{ color: "var(--brand)", fontFamily: "ui-monospace, monospace", fontSize: "11px" }}>
-                                    {s.subject_reference} ➔ {m.target_subject_reference}
-                                  </span>
-                                </div>
-                              )}
-                              <div className="sub-meta">
-                                Stripped: <code>id</code>, <code>meta</code>, <code>text</code> • FHIR R4 Valid
-                              </div>
-                            </td>
-                            <td>
-                              {r.target_id ? (
-                                <div>
-                                  <a
-                                    href={`http://localhost:3000/${resourceType}/${r.target_id}`}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="target-link"
-                                    title={`Click to view this ${resourceType} in Medplum Web App`}
-                                  >
-                                    {r.target_id.slice(0, 16)}… ↗
-                                  </a>
-                                  <div className="sub-meta">
-                                    {deliveryAction === "created" ? (
-                                      <span style={{ color: "var(--ok)", fontWeight: 600 }}>+ Newly Created in DB</span>
-                                    ) : deliveryAction === "updated" ? (
-                                      <span style={{ color: "var(--info)", fontWeight: 600 }}>↻ Updated Existing Record</span>
-                                    ) : (
-                                      `Saved in Medplum ${resourceType}`
-                                    )}
-                                  </div>
-                                </div>
-                              ) : r.status === "dry_run" ? (
-                                <span className="sub-meta" style={{ fontStyle: "italic", color: "var(--text-muted)" }}>
-                                  Validated (Ready to commit)
-                                </span>
-                              ) : (
-                                "—"
-                              )}
-                            </td>
-                            <td>
-                              <span className={`chip ${STATUS_CLASS[r.status] || ""}`}>{r.status}</span>
-                              {deliveryAction && (
-                                <span
-                                  className={`chip ${deliveryAction === "created" ? "ok" : "info"}`}
-                                  style={{ marginLeft: "4px", fontSize: "11px" }}
-                                >
-                                  {deliveryAction}
-                                </span>
-                              )}
-                              {r.errors && r.errors.length > 0 && (
-                                <div className="error" style={{ fontSize: "12px", marginTop: "4px" }}>
-                                  {r.errors.join("; ")}
-                                </div>
-                              )}
-                            </td>
-                            <td style={{ textAlign: "right" }}>
-                              <button className="secondary sm" onClick={() => openInspector(r)}>
-                                Inspect
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-
-                {/* Footer Pagination Navigation */}
-                {totalPages > 1 && (
-                  <div
-                    className="row between"
-                    style={{
-                      marginTop: "12px",
-                      paddingTop: "8px",
-                      borderTop: "1px solid var(--card-border)",
-                      alignItems: "center",
-                      fontSize: "12px",
-                      color: "var(--text-muted)",
-                    }}
-                  >
-                    <span>
-                      Showing {Math.min(filteredResults.length, (safePage - 1) * pageSize + 1)} to{" "}
-                      {Math.min(filteredResults.length, safePage * pageSize)} of {filteredResults.length} records
-                    </span>
-                    <div style={{ display: "flex", gap: "6px" }}>
-                      <button
-                        className="secondary sm"
-                        disabled={safePage <= 1}
-                        onClick={() => setCurrentPage(1)}
-                        title="First page"
-                      >
-                        «
-                      </button>
-                      <button
-                        className="secondary sm"
-                        disabled={safePage <= 1}
-                        onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                      >
-                        Previous
-                      </button>
-                      <span style={{ padding: "4px 8px", fontWeight: 600, color: "#fff" }}>
-                        Page {safePage} of {totalPages}
-                      </span>
-                      <button
-                        className="secondary sm"
-                        disabled={safePage >= totalPages}
-                        onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                      >
-                        Next
-                      </button>
-                      <button
-                        className="secondary sm"
-                        disabled={safePage >= totalPages}
-                        onClick={() => setCurrentPage(totalPages)}
-                        title="Last page"
-                      >
-                        »
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </>
-            );
-          })()}
-        </div>
-      )}
-
-      {/* 4. Glossy Inspector Modal with 3 Perspectives */}
-      {activeRecord && (
-        <div className="modal-overlay" onClick={() => setActiveRecord(null)}>
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            {/* Modal Header */}
-            <div className="modal-header">
-              <div>
-                <h3 style={{ margin: 0, marginBottom: "4px" }}>
-                  Record Mapping Inspector: <code>{activeRecord.source_id}</code> ({resourceType})
-                </h3>
-                <span className={`chip ${STATUS_CLASS[activeRecord.status] || ""}`}>
-                  Status: {activeRecord.status}
-                </span>
-                {activeRecord.mapping_details?.delivery_action && (
-                  <span
-                    className={`chip ${activeRecord.mapping_details.delivery_action === "created" ? "ok" : "info"}`}
-                    style={{ marginLeft: "6px" }}
-                  >
-                    Action: {activeRecord.mapping_details.delivery_action}
-                  </span>
-                )}
-                {activeRecord.target_id && (
-                  <span style={{ marginLeft: "12px", fontSize: "13px" }}>
-                    Medplum ID:{" "}
-                    <a
-                      href={`http://localhost:3000/${resourceType}/${activeRecord.target_id}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="target-link"
-                    >
-                      {activeRecord.target_id} ↗
-                    </a>
-                  </span>
-                )}
-              </div>
-              <button className="secondary sm" onClick={() => setActiveRecord(null)}>
-                ✕ Close
-              </button>
-            </div>
-
-            {/* Modal Tabs */}
-            <div className="modal-tabs">
-              <button
-                className={`modal-tab-btn ${modalTab === "recon" ? "active" : ""}`}
-                onClick={() => setModalTab("recon")}
-              >
-                <span>🔄</span> Dynamic Reconciliation Matrix
-              </button>
-              <button
-                className={`modal-tab-btn ${modalTab === "dest" ? "active" : ""}`}
-                onClick={() => setModalTab("dest")}
-              >
-                <span>🏥</span> Destination DB Perspective
-              </button>
-              <button
-                className={`modal-tab-btn ${modalTab === "raw" ? "active" : ""}`}
-                onClick={() => setModalTab("raw")}
-              >
-                <span>📄</span> Raw JSON Payloads
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="modal-body">
-              {/* TAB 1: Dynamic Reconciliation Table */}
-              {modalTab === "recon" && (
-                <div>
-                  <div style={{ marginBottom: "14px", fontSize: "13px", color: "var(--text-muted)" }}>
-                    Schema-agnostic field extraction matrix. Automatically unrolls complex FHIR structures and tracks transformation derivations.
-                  </div>
-                  <ReconciliationTable
-                    table={activeRecord.reconciliation_table}
-                    sourceTitle="Source Payload (HAPI)"
-                    targetTitle="Target Stored (Medplum)"
-                  />
-                </div>
-              )}
-
-              {/* TAB 2: Destination DB Perspective */}
-              {modalTab === "dest" && (
-                <div>
-                  <div className="dest-summary-card">
-                    <div className="row between" style={{ marginTop: 0, marginBottom: "10px" }}>
-                      <h4 style={{ margin: 0, fontSize: "14px", color: "var(--brand)" }}>
-                        Destination Profile: Medplum FHIR R4
-                      </h4>
-                      {activeRecord.target_id && (
-                        <a
-                          href={`http://localhost:3000/${resourceType}/${activeRecord.target_id}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="target-link"
-                          style={{ fontSize: "13px" }}
-                        >
-                          View in Medplum Console ↗
-                        </a>
-                      )}
-                    </div>
-
-                    <div className="dest-meta-grid">
-                      <div className="dest-meta-item">
-                        <label>Target Resource</label>
-                        <div>{resourceType}</div>
-                      </div>
-                      <div className="dest-meta-item">
-                        <label>Assigned UUID</label>
-                        <div>{activeRecord.target_id || "— (Pending Commit)"}</div>
-                      </div>
-                      <div className="dest-meta-item">
-                        <label>Scoped Identifier</label>
-                        <div>{activeRecord.mapping_details?.idempotent_identifier || "—"}</div>
-                      </div>
-                      <div className="dest-meta-item">
-                        <label>Delivery Action</label>
-                        <div style={{ color: activeRecord.status === "delivered" ? "var(--ok)" : "var(--warn)" }}>
-                          {activeRecord.status.toUpperCase()} ({activeRecord.mapping_details?.delivery_action || "ready"})
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {activeRecord.target_id ? (
-                    <div style={{ marginBottom: "20px" }}>
-                      <div className="row between" style={{ marginBottom: "12px" }}>
-                        <div>
-                          <strong>Live Database Verification:</strong>
-                          <span className="sub-meta" style={{ marginLeft: "8px" }}>
-                            Directly query Medplum PostgreSQL/FHIR store to confirm live persisted record state.
-                          </span>
-                        </div>
-                        <button
-                          className="primary sm"
-                          onClick={fetchLiveDestination}
-                          disabled={liveLoading}
-                        >
-                          {liveLoading ? "Querying Medplum…" : "⚡ Verify Live in Medplum DB"}
-                        </button>
-                      </div>
-
-                      {liveError && (
-                        <div className="error" style={{ background: "rgba(239, 68, 68, 0.1)", padding: "10px 14px", borderRadius: "8px", border: "1px solid var(--bad-border)" }}>
-                          Verification failed: {liveError}
-                        </div>
-                      )}
-
-                      {liveData && (
-                        <div className="live-verify-banner">
-                          <div>
-                            <span style={{ color: "var(--ok)", fontWeight: 700, fontSize: "14px" }}>
-                              ✓ Confirmed Live in Medplum Database!
-                            </span>
-                            <div className="sub-meta">
-                              Version ID: <code>{liveData.meta?.versionId || "1"}</code> • Last Updated:{" "}
-                              <code>{liveData.meta?.lastUpdated || "Just now"}</code> • ID: <code>{liveData.id}</code>
-                            </div>
-                          </div>
-                          <span className="chip ok">Verified in DB</span>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="spec-box" style={{ margin: "16px 0" }}>
-                      <strong>Dry Run Mode:</strong> This record was verified against the FHIR R4 schema. Deliver the batch to generate a permanent Medplum database ID.
-                    </div>
-                  )}
-
-                  <h4 style={{ margin: "18px 0 8px", fontSize: "14px" }}>
-                    Stored Resource Attributes (Destination Perspective)
-                  </h4>
-                  <ReconciliationTable
-                    table={activeRecord.reconciliation_table.filter(
-                      (r) => r.status !== "dropped" && r.status !== "sanitized"
-                    )}
-                    sourceTitle="Input Source"
-                    targetTitle="Committed in Medplum"
-                  />
-                </div>
-              )}
-
-              {/* TAB 3: Raw JSON Payloads */}
-              {modalTab === "raw" && (
-                <div className="grid2">
-                  <div className="pane">
-                    <div className="row between" style={{ margin: "0 0 8px" }}>
-                      <h4 style={{ margin: 0, textTransform: "uppercase", fontSize: "12px", color: "var(--text-muted)" }}>
-                        1. Source HAPI FHIR Record
-                      </h4>
-                      <button
-                        className="secondary sm"
-                        onClick={() => copyPayload("src", activeRecord.source_record)}
-                      >
-                        {copiedKey === "src" ? "✓ Copied" : "Copy Source JSON"}
-                      </button>
-                    </div>
-                    <pre>{JSON.stringify(activeRecord.source_record || {}, null, 2)}</pre>
-                  </div>
-
-                  <div className="pane">
-                    <div className="row between" style={{ margin: "0 0 8px" }}>
-                      <h4 style={{ margin: 0, textTransform: "uppercase", fontSize: "12px", color: "var(--text-muted)" }}>
-                        2. Target Medplum Record
-                      </h4>
-                      <button
-                        className="secondary sm"
-                        onClick={() => copyPayload("tgt", liveData || activeRecord.target_record)}
-                      >
-                        {copiedKey === "tgt" ? "✓ Copied" : "Copy Target JSON"}
-                      </button>
-                    </div>
-                    <pre>{JSON.stringify(liveData || activeRecord.target_record || {}, null, 2)}</pre>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Unified Inspector Modal (shared with UploadPage) */}
+      <InspectRecordModal
+        activeRecord={activeRecord}
+        targetResource={resourceType}
+        sourceLabel="Source Payload (HAPI)"
+        enableDestinationTab={true}
+        onClose={() => setActiveRecord(null)}
+      />
     </section>
   );
 }

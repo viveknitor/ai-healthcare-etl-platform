@@ -1,74 +1,80 @@
 import React from "react";
+import Badge from "@/components/ui/Badge.jsx";
+import { cn } from "@/utils/cn.js";
+
+const VALUE_TONE_CLASS = {
+  ok: "text-[var(--ok)]",
+  brand: "text-[var(--brand)]",
+  warn: "text-[var(--warn)]",
+  bad: "text-[var(--bad)]",
+  ai: "text-[var(--ai)]",
+  neutral: "text-[var(--text-primary)]",
+};
 
 export default function MetricCard({
   title,
   value,
   subvalue,
-  icon,
+  icon: Icon,
   badge,
-  badgeType = "ok", // "ok" | "bad" | "warn" | "info" | "brand"
+  badgeType = "neutral", // "ok" | "bad" | "warn" | "info" | "brand" | "ai" | "neutral"
   trend,
-  color = "var(--brand)",
+  tone = "neutral",
+  loading = false,
   onClick,
 }) {
-  return (
-    <div
-      className="metric-card"
-      onClick={onClick}
-      style={{
-        cursor: onClick ? "pointer" : "default",
-        position: "relative",
-        overflow: "hidden",
-      }}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
-        <span className="metric-title">{title}</span>
-        {icon && (
-          <div
-            className="metric-icon-box"
-            style={{
-              background: `rgba(255, 255, 255, 0.05)`,
-              color: color,
-              border: `1px solid rgba(255, 255, 255, 0.1)`,
-            }}
-          >
-            {icon}
-          </div>
-        )}
-      </div>
+  const Comp = onClick ? "button" : "div";
 
-      <div style={{ display: "flex", alignItems: "baseline", gap: "8px", flexWrap: "wrap" }}>
-        <span className="metric-value" style={{ color }}>{value}</span>
-        {badge && (
-          <span className={`chip ${badgeType}`} style={{ fontSize: "11px", fontWeight: 600 }}>
-            {badge}
+  return (
+    <Comp
+      type={onClick ? "button" : undefined}
+      onClick={onClick}
+      className={cn(
+        "flex flex-col justify-between gap-3 rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 text-left shadow-[var(--shadow-sm)]",
+        onClick &&
+          "cursor-pointer transition-colors duration-150 hover:bg-[var(--bg-subtle)] hover:border-[var(--border-strong)]"
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-xs font-semibold text-[var(--text-muted)]">{title}</span>
+        {Icon && (
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-subtle)] text-[var(--text-secondary)]">
+            <Icon className="h-4 w-4" aria-hidden="true" />
           </span>
         )}
       </div>
 
-      {(subvalue || trend) && (
-        <div style={{ marginTop: "6px", fontSize: "12px", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "6px" }}>
-          {trend && <span style={{ color: trend.startsWith("+") ? "var(--ok)" : "var(--warn)", fontWeight: 600 }}>{trend}</span>}
-          {subvalue && <span>{subvalue}</span>}
+      {loading ? (
+        <div className="space-y-2 py-1" aria-busy="true">
+          <div className="h-7 w-24 rounded bg-[var(--bg-muted)]" />
+          <div className="h-3.5 w-32 rounded bg-[var(--bg-subtle)]" />
         </div>
-      )}
+      ) : (
+        <>
+          <div className="flex flex-wrap items-baseline gap-2">
+            <span className={cn("text-2xl font-bold tracking-tight tabular-nums", VALUE_TONE_CLASS[tone] || VALUE_TONE_CLASS.neutral)}>
+              {value}
+            </span>
+            {badge && <Badge tone={badgeType}>{badge}</Badge>}
+          </div>
 
-      {/* Decorative gradient corner glow */}
-      <div
-        style={{
-          position: "absolute",
-          right: "-20px",
-          bottom: "-20px",
-          width: "80px",
-          height: "80px",
-          background: color,
-          opacity: 0.06,
-          filter: "blur(24px)",
-          borderRadius: "50%",
-          pointerEvents: "none",
-        }}
-      />
-    </div>
+          {(subvalue || trend) && (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--text-muted)] tabular-nums">
+              {trend && (
+                <span
+                  className={cn(
+                    "font-semibold",
+                    trend.startsWith("+") ? "text-[var(--ok)]" : "text-[var(--warn)]"
+                  )}
+                >
+                  {trend}
+                </span>
+              )}
+              {subvalue && <span>{subvalue}</span>}
+            </div>
+          )}
+        </>
+      )}
+    </Comp>
   );
 }
-
